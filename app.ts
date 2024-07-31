@@ -1,50 +1,53 @@
-// app.ts
-import express from 'express';
+import express, { Application } from 'express';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
-import redis from 'redis';
-import { createClient } from 'redis';
+import { createClient, RedisClientType } from 'redis';
 import { routeApp } from './src/routers';
 import { errorHandler } from './src/middleware/errorHandler';
 import { setupDatabase } from './src/database';
 
-const app = express();
+const app: Application = express();
 
 // Redis client setup
-const redisClient = createClient({
+const redisClient: RedisClientType = createClient({
     url: process.env.REDIS_URL
 });
 
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
-await redisClient.connect();
 
-// Middleware
-app.use(helmet());
-app.use(compression());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+async function startServer() {
+    await redisClient.connect();
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
+    // Middleware
+    app.use(helmet());
+    app.use(compression());
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
 
-// Database setup
-await setupDatabase();
+    // Rate limiting
+    const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 100 // limit each IP to 100 requests per windowMs
+    });
+    app.use(limiter);
 
-// Routes
-routeApp(app, redisClient);
+    // Database setup
+    await setupDatabase();
 
-// Error handling middleware
-app.use(errorHandler);
+    // Routes
+    routeApp(app, redisClient);
 
-const PORT = process.env.PORT || 3000;
+    // Error handling middleware
+    app.use(errorHandler);
 
-app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-});
+    const PORT = process.env.PORT || 3000;
+
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
+
+startServer().catch(console.error);
 
 export default app;

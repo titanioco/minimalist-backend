@@ -2,13 +2,20 @@
   "compilerOptions": {
     "target": "ES6",
     "module": "commonjs",
+    "lib": ["es6", "dom"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "typeRoots": ["./node_modules/@types", "./types"]
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "baseUrl": ".",
+    "paths": {
+      "*": ["node_modules/*", "src/types/*"]
+    },
+    "resolveJsonModule": true,
+    "moduleResolution": "node"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "**/*.spec.ts"]

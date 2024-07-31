@@ -1,4 +1,4 @@
-import { Application } from "express";
+import { Application } from "express-serve-static-core";
 import { RedisClientType } from 'redis';
 import { createUserRouteV1 } from "./v1/user.route";
 import { createMainRouteV1 } from "./v1/main.route";
