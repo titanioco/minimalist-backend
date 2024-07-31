@@ -1,5 +1,7 @@
+import express from "express";
+import { RedisClientType } from 'redis';
 import {
-  getNumberWalletsCreatedByAffiliate,
+	getNumberWalletsCreatedByAffiliate,
 	getNumberWalletsOutApp,
 	getTotalBTCAndETHDepositFromStackInception,
 	getTotalDepositFromStackInception,
@@ -10,19 +12,22 @@ import {
 	walletsOpenedStatistic,
 	getTotalBTCAndETHSwapped,
 } from "controllers/statistic.controllers";
-import express from "express";
 
-const statisticRouteV1 = express.Router();
+const createStatisticRouteV1 = (redisClient: RedisClientType) => {
+	const router = express.Router();
 
-statisticRouteV1.get("/wallets-linked", getWalletsLinked);
-statisticRouteV1.get("/wallets-opened-statistic", walletsOpenedStatistic);
-statisticRouteV1.get("/total-stack", getCurrentStackValue);
-statisticRouteV1.get("/number-wallet-closed", getNumberWalletsOutApp);
-statisticRouteV1.get("/wallets-created-by-affiliate", getNumberWalletsCreatedByAffiliate);
-statisticRouteV1.get("/total-deposit-from-stack-inception", getTotalDepositFromStackInception);
-statisticRouteV1.get("/total-btc-eth-deposit-from-stack-inception", getTotalBTCAndETHDepositFromStackInception);
-statisticRouteV1.get("/total-usdc-withdraw", getTotalWithdraw);
-statisticRouteV1.get("/wallets-deposited-morethan-4-times", getWalletsDepositedMorethan4Times);
-statisticRouteV1.get("/total-btc-eth-swapped", getTotalBTCAndETHSwapped);
+	router.get("/wallets-linked", getWalletsLinked);
+	router.get("/wallets-opened-statistic", walletsOpenedStatistic);
+	router.get("/total-stack", getCurrentStackValue);
+	router.get("/number-wallet-closed", getNumberWalletsOutApp);
+	router.get("/wallets-created-by-affiliate", getNumberWalletsCreatedByAffiliate);
+	router.get("/total-deposit-from-stack-inception", getTotalDepositFromStackInception);
+	router.get("/total-btc-eth-deposit-from-stack-inception", getTotalBTCAndETHDepositFromStackInception);
+	router.get("/total-usdc-withdraw", getTotalWithdraw);
+	router.get("/wallets-deposited-morethan-4-times", getWalletsDepositedMorethan4Times);
+	router.get("/total-btc-eth-swapped", getTotalBTCAndETHSwapped);
 
-export { statisticRouteV1 };
+	return router;
+};
+
+export { createStatisticRouteV1 };

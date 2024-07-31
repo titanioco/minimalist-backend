@@ -1,15 +1,18 @@
-import { getNonce, getUsers } from "controllers/user.controllers";
-
+import { userController } from "../../controllers/user.controller";
 import express from "express";
+import { RedisClientType } from 'redis';
 
-const mainRouteV1 = express.Router();
+export const createMainRouteV1 = (redisClient: RedisClientType) => {
+    const router = express.Router();
+    const { getNonce, getUsers } = userController(redisClient);
 
-mainRouteV1.get("/nonce/:address", getNonce);
-mainRouteV1.get("/users", getUsers);
+    router.get("/nonce/:address", getNonce);
+    router.get("/users", getUsers);
 
-// mainRouteV1.get("/handle_transactions", handleTransactions);
-// mainRouteV1.get("/handle_deposit", handleDeposit);
-// mainRouteV1.get("/handle_swap", handleSwap);
-// mainRouteV1.get("/handle_hf", handleHF);
+    // router.get("/handle_transactions", handleTransactions);
+    // router.get("/handle_deposit", handleDeposit);
+    // router.get("/handle_swap", handleSwap);
+    // router.get("/handle_hf", handleHF);
 
-export { mainRouteV1 };
+    return router;
+};

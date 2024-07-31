@@ -8,7 +8,7 @@ import moment from 'moment';
 import { getLedger } from '../utils/abis';
 import { getLedgerAddress } from '../constants/contracts';
 import { provider } from '../utils/provider';
-import { TokenRecordType, TransactionStatus } from '../utils/types';
+import { TokenRecordType, TransactionStatus } from '../utils/types/types';
 import { getTokenPricing } from '../utils/aave';
 import { getWBTC, getWETH } from '../constants/tokens';
 

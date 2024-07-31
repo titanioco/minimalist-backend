@@ -1,9 +1,9 @@
-import { createPool, Pool } from 'pg';
+import { Pool } from 'pg';
 
 let pool: Pool;
 
 export const setupDatabase = async () => {
-  pool = createPool({
+  pool = new Pool({
     user: process.env.DB_USER,
     host: process.env.DB_HOST,
     database: process.env.DB_NAME,

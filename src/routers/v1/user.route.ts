@@ -1,23 +1,32 @@
 import express from "express";
-import auth from "middlewares/auth";
-import {
-	getChildren,
-	getUser,
-	getUserByCode,
-	getYTD,
-	register,
-	setUserNeedUpdate,
-	updateUser,
-} from "controllers/user.controllers";
+import { RedisClientType } from 'redis';
+import auth, { authRateLimiter } from "../../middleware/auth";
+import { userController } from "../../controllers/user.controller";
 
-const userRouteV1 = express.Router();
+const createUserRouteV1 = (redisClient: RedisClientType) => {
+	const router = express.Router();
+	const {
+		getChildren,
+		getUser,
+		getUserByCode,
+		getYTD,
+		register,
+		setUserNeedUpdate,
+		updateUser
+	} = userController(redisClient);
 
-userRouteV1.get("/code/:code", getUserByCode);
-userRouteV1.get("/children/:address", getChildren);
-userRouteV1.get("/ytd/:address", getYTD);
-userRouteV1.get("/:address", getUser);
-userRouteV1.post("/:address", auth, register);
-userRouteV1.put("/set_need_update/:address", setUserNeedUpdate);
-userRouteV1.put("/:address", auth, updateUser);
+	// Public routes
+	router.get("/code/:code", getUserByCode);
+	router.get("/children/:address", getChildren);
+	router.get("/ytd/:address", getYTD);
+	router.get("/:address", getUser);
 
-export { userRouteV1 };
+	// Protected routes with rate limiting
+	router.post("/:address", authRateLimiter, auth, register);
+	router.put("/set_need_update/:address", authRateLimiter, auth, setUserNeedUpdate);
+	router.put("/:address", authRateLimiter, auth, updateUser);
+
+	return router;
+};
+
+export { createUserRouteV1 };
