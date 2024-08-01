@@ -1,4 +1,4 @@
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express-serve-static-core';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import { getAddress, isAddress } from 'ethers';

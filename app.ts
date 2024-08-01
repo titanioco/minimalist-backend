@@ -6,6 +6,7 @@ import { createClient, RedisClientType } from 'redis';
 import { routeApp } from './src/routers';
 import { errorHandler } from './src/middleware/errorHandler';
 import { setupDatabase } from './src/database';
+import { setupCronJobs } from './src/cronJobs';
 
 const app: Application = express();
 
@@ -45,6 +46,10 @@ async function startServer() {
 
     app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
+        
+        // Setup and start cron jobs
+        setupCronJobs(redisClient);
+        console.log('Cron jobs have been set up');
     });
 }
 
