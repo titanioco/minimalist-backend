@@ -5,14 +5,25 @@ export const enum ChainId {
     FTM_TESTNET = 4002,
 }
 
-export type TransactionStatus = 'pending' | 'success' | 'fail';
+export const TransactionStatus = {
+    PENDING: 'pending',
+    SUCCESS: 'success',
+    FAIL: 'fail'
+} as const;
+
+export type TransactionStatus = typeof TransactionStatus[keyof typeof TransactionStatus];
 
 export const enum TransactionType {
     DEPOSIT_REF = "DEPOSIT_REFERRAL",
     SWAP_REF = "SWAP_REFERRAL",
 }
 
-export type TokenRecordType = 'deposit' | 'withdraw';
+export const TokenRecordType = {
+    DEPOSIT: 'deposit',
+    WITHDRAW: 'withdraw'
+} as const;
+
+export type TokenRecordType = typeof TokenRecordType[keyof typeof TokenRecordType];
 
 // Custom error class
 export class AppError extends Error {
@@ -30,11 +41,11 @@ export type TransactionId = Brand<string, 'TransactionId'>;
 
 // Type guards
 export const isTransactionStatus = (status: any): status is TransactionStatus => {
-    return ['pending', 'success', 'fail'].includes(status);
+    return Object.values(TransactionStatus).includes(status);
 };
 
 export const isTokenRecordType = (type: any): type is TokenRecordType => {
-    return ['deposit', 'withdraw'].includes(type);
+    return Object.values(TokenRecordType).includes(type);
 };
 
 // Helper function to create branded types

@@ -2,7 +2,7 @@ import { userController } from "../../controllers/user.controller";
 import express from "express";
 import { RedisClientType } from 'redis';
 
-export const createMainRouteV1 = (redisClient: RedisClientType) => {
+export const createMainRoute = (redisClient: RedisClientType) => {
     const router = express.Router();
     const { getNonce, getUsers } = userController(redisClient);
 

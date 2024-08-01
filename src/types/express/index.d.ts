@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import * as express from 'express';
 import { UserEntity } from '../../utils/entities/user.entity';
 
 declare global {
@@ -8,3 +8,5 @@ declare global {
         }
     }
 }
+
+export = express;

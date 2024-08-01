@@ -1,16 +1,18 @@
-import { Request, Response } from 'express';
+import { Request, Response } from 'express-serve-static-core';
 import { RedisClientType } from 'redis';
 import { getPool } from '../database';
-import { isAddress, getAddress } from 'ethers/lib/utils';
+import { isAddress, getAddress } from 'ethers';
 import { ethers } from 'ethers';
 import _ from 'lodash';
 import moment from 'moment';
 import { getLedger } from '../utils/abis';
 import { getLedgerAddress } from '../constants/contracts';
 import { provider } from '../utils/provider';
-import { TokenRecordType, TransactionStatus } from '../utils/types/types';
+import { TransactionStatus, TokenRecordType } from '../utils/types/types';
 import { getTokenPricing } from '../utils/aave';
 import { getWBTC, getWETH } from '../constants/tokens';
+import HttpStatus from '../utils/types/httpStatus';
+
 
 export const userController = (redisClient: RedisClientType) => ({
     getNonce: async (req: Request, res: Response) => {
@@ -164,7 +166,7 @@ export const userController = (redisClient: RedisClientType) => ({
 
             const ledgerContract = getLedger(getLedgerAddress(), provider);
             const walletAddress = await ledgerContract.getWallet(getAddress(address));
-            if (walletAddress === ethers.constants.AddressZero) {
+            if (walletAddress === ethers.ZeroAddress) {
                 return res.status(400).json({ message: 'Something went wrong' });
             }
 
@@ -197,89 +199,73 @@ export const userController = (redisClient: RedisClientType) => ({
 
     updateUser: async (req: Request, res: Response) => {
         try {
-            const { address } = req.params;
+            const { address: userAddress } = req.params;
             const data = req.body;
-
-            if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+            if (!userAddress || !isAddress(userAddress)) {
+                return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
             }
-
+    
             const pool = getPool();
-            const existingUser = await pool.query('SELECT * FROM users WHERE address = $1', [getAddress(address)]);
-            if (existingUser.rows.length === 0) {
-                return res.status(404).json({ message: 'User not found' });
+            const userResult = await pool.query('SELECT * FROM users WHERE address = $1', [getAddress(userAddress)]);
+            
+            if (userResult.rows.length === 0) {
+                return res.status(HttpStatus.BadRequest).json({ message: "User not found" });
             }
-
+    
             const updateFields = [
-                'safe_hf', 'risk_hf', 'cron_time', 'recipient', 'deposit_enabled',
-                'protection_enabled', 'deposit_amount', 'deposit_buffer',
-                'last_deposited_at', 'last_swapped_at'
+                "safe_hf",
+                "risk_hf",
+                "cron_time",
+                "recipient",
+                "deposit_enabled",
+                "protection_enabled",
+                "deposit_amount",
+                "deposit_buffer",
+                "last_deposited_at",
+                "last_swapped_at",
             ];
-
-            const updates = [];
-            const values = [];
-            let paramCounter = 1;
-
-            for (const field of updateFields) {
-                if (data[field] !== undefined) {
-                    updates.push(`${field} = $${paramCounter}`);
-                    values.push(data[field]);
-                    paramCounter++;
-                }
-            }
-
-            if (updates.length > 0) {
-                values.push(getAddress(address));
-                await pool.query(
-                    `UPDATE users SET ${updates.join(', ')} WHERE address = $${paramCounter}`,
-                    values
-                );
-            }
-
+    
+            const updateValues = updateFields.map(field => data[field]);
+            const updateQuery = `UPDATE users SET ${updateFields.map((field, index) => `${field} = $${index + 2}`).join(', ')} WHERE address = $1 RETURNING *`;
+            
+            const updatedUserResult = await pool.query(updateQuery, [getAddress(userAddress), ...updateValues]);
+            const updatedUser = updatedUserResult.rows[0];
+    
             if (data.transactions) {
                 const transactionValues = data.transactions.map((transaction: any) => [
-                    existingUser.rows[0].id,
+                    updatedUser.id,
                     transaction.hash,
                     JSON.stringify(transaction.descriptions),
                     TransactionStatus.SUCCESS
                 ]);
-
+                
                 await pool.query(
                     'INSERT INTO transactions (user_id, hash, descriptions, status) VALUES ' +
                     transactionValues.map((_: any, index: number) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4})`).join(', '),
                     transactionValues.flat()
                 );
             }
-
-            if (data.refTransactions && existingUser.rows[0].referrer_id) {
+    
+            if (data.refTransactions && updatedUser.referrer_id) {
                 const refTransactionValues = data.refTransactions.map((transaction: any) => [
-                    existingUser.rows[0].id,
-                    existingUser.rows[0].referrer_id,
+                    updatedUser.id,
+                    updatedUser.referrer_id,
                     transaction.hash,
                     transaction.description,
                     TransactionStatus.SUCCESS
                 ]);
-
+                
                 await pool.query(
                     'INSERT INTO ref_transactions (from_id, to_id, hash, description, status) VALUES ' +
                     refTransactionValues.map((_: any, index: number) => `($${index * 5 + 1}, $${index * 5 + 2}, $${index * 5 + 3}, $${index * 5 + 4}, $${index * 5 + 5})`).join(', '),
                     refTransactionValues.flat()
                 );
             }
-
-            // Invalidate relevant caches
-            await redisClient.del(`user:${address}`);
-            await redisClient.del('all:users');
-
-            const updatedUser = await pool.query(
-                'SELECT u.*, r.address AS referrer_address FROM users u LEFT JOIN users r ON u.referrer_id = r.id WHERE u.address = $1',
-                [getAddress(address)]
-            );
-
-            res.json({ data: updatedUser.rows[0] });
+    
+            res.json({ data: updatedUser });
         } catch (error) {
             console.error('Error in updateUser:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
         }
     },
 

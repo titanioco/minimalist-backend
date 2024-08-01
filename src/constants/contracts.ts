@@ -1,5 +1,5 @@
 import { LEDGER_ADDRESS, NETWORK } from "../utils";
-import { ChainId } from "../utils/types";
+import { ChainId } from "../utils/types/types";
 
 export interface Address {
 	137: string;

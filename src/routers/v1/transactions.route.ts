@@ -1,13 +1,16 @@
 import express from "express";
+import { Router } from 'express-serve-static-core';
 import { RedisClientType } from 'redis';
-import {
-	getRefTransactions,
-	getTransaction,
-	getTransactions,
-} from "controllers/transaction.controllers";
+import { transactionController } from "../../controllers/transaction.controller";
 
-const createTransactionsRouteV1 = (redisClient: RedisClientType) => {
-	const router = express.Router();
+const createTransactionsRoute = (redisClient: RedisClientType): Router => {
+	const router = express.Router() as Router;
+
+	const {
+		getTransactions,
+		getTransaction,
+		getRefTransactions
+	} = transactionController(redisClient);
 
 	router.get("/:address", getTransactions);
 	router.get("/txn/:hash", getTransaction);
@@ -16,4 +19,4 @@ const createTransactionsRouteV1 = (redisClient: RedisClientType) => {
 	return router;
 };
 
-export { createTransactionsRouteV1 };
+export { createTransactionsRoute };

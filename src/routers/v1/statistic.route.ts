@@ -1,33 +1,21 @@
 import express from "express";
+import { statisticController } from "../../controllers/statistic.controller";
 import { RedisClientType } from 'redis';
-import {
-	getNumberWalletsCreatedByAffiliate,
-	getNumberWalletsOutApp,
-	getTotalBTCAndETHDepositFromStackInception,
-	getTotalDepositFromStackInception,
-	getCurrentStackValue,
-	getTotalWithdraw,
-	getWalletsDepositedMorethan4Times,
-	getWalletsLinked,
-	walletsOpenedStatistic,
-	getTotalBTCAndETHSwapped,
-} from "controllers/statistic.controllers";
 
-const createStatisticRouteV1 = (redisClient: RedisClientType) => {
-	const router = express.Router();
+export const createStatisticRouter = (redisClient: RedisClientType) => {
+  const router = express.Router();
+  const controller = statisticController(redisClient);
 
-	router.get("/wallets-linked", getWalletsLinked);
-	router.get("/wallets-opened-statistic", walletsOpenedStatistic);
-	router.get("/total-stack", getCurrentStackValue);
-	router.get("/number-wallet-closed", getNumberWalletsOutApp);
-	router.get("/wallets-created-by-affiliate", getNumberWalletsCreatedByAffiliate);
-	router.get("/total-deposit-from-stack-inception", getTotalDepositFromStackInception);
-	router.get("/total-btc-eth-deposit-from-stack-inception", getTotalBTCAndETHDepositFromStackInception);
-	router.get("/total-usdc-withdraw", getTotalWithdraw);
-	router.get("/wallets-deposited-morethan-4-times", getWalletsDepositedMorethan4Times);
-	router.get("/total-btc-eth-swapped", getTotalBTCAndETHSwapped);
+  router.get("/wallets-linked", controller.getWalletsLinked);
+  router.get("/wallets-opened-statistic", controller.walletsOpenedStatistic);
+  router.get("/total-stack", controller.getCurrentStackValue);
+  router.get("/number-wallet-closed", controller.getNumberWalletsOutApp);
+  router.get("/wallets-created-by-affiliate", controller.getNumberWalletsCreatedByAffiliate);
+  router.get("/total-deposit-from-stack-inception", controller.getTotalDepositFromStackInception);
+  router.get("/total-btc-eth-deposit-from-stack-inception", controller.getTotalBTCAndETHDepositFromStackInception);
+  router.get("/total-usdc-withdraw", controller.getTotalWithdraw);
+  router.get("/wallets-deposited-morethan-4-times", controller.getWalletsDepositedMorethan4Times);
+  router.get("/total-btc-eth-swapped", controller.getTotalBTCAndETHSwapped);
 
-	return router;
+  return router;
 };
-
-export { createStatisticRouteV1 };

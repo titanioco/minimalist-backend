@@ -1,5 +1,5 @@
 import { NETWORK } from "../utils";
-import { ChainId } from "../utils/types";
+import { ChainId } from "../utils/types/types";
 
 export interface Token {
 	name: string;
