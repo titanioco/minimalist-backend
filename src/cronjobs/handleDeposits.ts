@@ -176,157 +176,187 @@ const depositUSDC = async (
 };
 
 const handleDeposit = async (
-    user: UserEntity,
+    user: any,
     prices: Record<string, BigNumberJS>,
     overrides: TransactionOverrides,
+    pool: Pool
 ) => {
-    const { referrer } = user;
-    const refAddress = referrer?.address ?? ethers.ZeroAddress;
+    const client = await pool.connect(); 
+    try {
+        await client.query('BEGIN');
 
-    const walletContract = getWallet(user.wallet_address, executor);
-    const USDC = getUSDC();
-    const WMATIC = getWMATIC();
-    const { [WMATIC.symbol]: nativePrice, [USDC.symbol]: usdcPrice } = prices;
-    const txs: ethers.TransactionRequest[] = [];
-    const descriptions: string[] = [];
-    const accountData = await getUserAccountData(user);
-    const usdcBalance = await getBalance(USDC.address, user.address);
-    const usdcDeposit = BigNumberJS(user.deposit_amount)
-        .multipliedBy(TEN_POW(getUSDC().decimals))
-        .multipliedBy(100 + user.deposit_buffer)
-        .div(100);
+        const { referrer } = user;
+        const refAddress = referrer?.address ?? ethers.ZeroAddress;
 
-    if (!usdcBalance.gte(usdcDeposit)) {
-        const transaction = TransactionEntity.create({
-            user,
-            descriptions: [`Deposit failed: insufficient ${USDC.symbol} balance.`],
-            status: TransactionStatus.FAIL,
-        });
-        await transaction.save();
-        return;
-    }
-    // deposit fee & borrow fee
-    const appFee = getAppFee(AppFeeType.DEPOSIT, usdcDeposit).plus(
-        getAppFee(AppFeeType.BORROW, BigNumberJS(user.deposit_amount).multipliedBy(TEN_POW(USDC.decimals))),
-    );
-    const gasLimit = HANDLE_DEPOSIT_GAS_LIMIT;
-    const gas = await getGasUse(overrides, gasLimit);
-    let gasUSD = gas.multipliedBy(nativePrice).div(TEN_POW(18 - USDC.decimals));
-    gasUSD = BigNumberJS(gasUSD.toFixed(0));
-    const afterHF = getHFAfterActions(accountData, [
-        {
-            token: USDC,
-            amount: usdcDeposit,
-            tokenPrice: usdcPrice,
-            type: ActionType.DEPOSIT,
-        },
-        {
-            token: USDC,
-            amount: BigNumberJS(user.deposit_amount).multipliedBy(TEN_POW(USDC.decimals)),
-            tokenPrice: usdcPrice,
-            type: ActionType.WITHDRAW,
-        },
-        {
-            token: USDC,
-            amount: gasUSD,
-            tokenPrice: usdcPrice,
-            type: ActionType.WITHDRAW,
-        },
-        {
-            token: USDC,
-            amount: appFee,
-            tokenPrice: usdcPrice,
-            type: ActionType.WITHDRAW,
-        },
-    ]);
-    if (!afterHF.gte(BigNumberJS(1.03))) {
-        const transaction = TransactionEntity.create({
-            user,
-            descriptions: [`Deposit failed: insufficient ${USDC.symbol} balance for fee.`],
-            status: TransactionStatus.FAIL,
-        });
-        await transaction.save();
-        return;
-    }
+        const walletContract = getWallet(user.wallet_address, executor);
+        const USDC = getUSDC();
+        const WMATIC = getWMATIC();
+        const { [WMATIC.symbol]: nativePrice, [USDC.symbol]: usdcPrice } = prices;
+        const txs: ethers.TransactionRequest[] = [];
+        const descriptions: string[] = [];
+        const accountData = await getUserAccountData(user);
+        const usdcBalance = await getBalance(USDC.address, user.address);
+        const usdcDeposit = BigNumberJS(user.deposit_amount)
+            .multipliedBy(TEN_POW(getUSDC().decimals))
+            .multipliedBy(100 + user.deposit_buffer)
+            .div(100);
 
-    const [txs0, descriptions0] = await depositUSDC(user, usdcDeposit, appFee, gasUSD);
-    txs.push(...txs0);
-    descriptions.push(...descriptions0);
-
-    const to: string[] = txs.map((tx) => tx.to as string);
-    const data: string[] = txs.map((tx) => tx.data as string);
-    const value: string[] = txs.map((tx) => tx.value?.toString() || "0");
-    const transaction = TransactionEntity.create({
-        user,
-        descriptions,
-        gas: getBalanceAmount(gasUSD, USDC.decimals).toFixed(2),
-    });
-
-    const estimatedGas = await walletContract.execute.estimateGas(
-        to,
-        data,
-        value,
-        USDC.address,
-        executor.address,
-        gas.toFixed(0)
-    );
-    
-    const tx = await walletContract.execute(
-        to,
-        data,
-        value,
-        USDC.address,
-        executor.address,
-        gas.toFixed(0),
-        {
-            maxFeePerGas: overrides.maxFeePerGas.toFixed(0),
-            maxPriorityFeePerGas: overrides.maxPriorityFeePerGas.toFixed(0),
-            gasLimit: calculateGasMargin(estimatedGas),
+        if (!usdcBalance.gte(usdcDeposit)) {
+            const { rows } = await client.query(
+                'INSERT INTO transactions (user_id, descriptions, status) VALUES ($1, $2, $3) RETURNING id',
+                [user.id, [`Deposit failed: insufficient ${USDC.symbol} balance.`], TransactionStatus.FAIL]
+            );
+            await client.query('COMMIT');
+            return;
         }
-    );
-    
-    transaction.hash = tx.hash;
-    transaction.status = TransactionStatus.PENDING;
-    await transaction.save();
 
-    if (refAddress !== ethers.ZeroAddress) {
-        const refTransaction = RefTransactionEntity.create({
-            from: user,
-            to: referrer,
-            description: TransactionType.DEPOSIT_REF,
-            amount: appFee.multipliedBy(10).div(100).toFixed(0),
-        });
+        const appFee = getAppFee(AppFeeType.DEPOSIT, usdcDeposit).plus(
+            getAppFee(AppFeeType.BORROW, BigNumberJS(user.deposit_amount).multipliedBy(TEN_POW(USDC.decimals))),
+        );
+        const gasLimit = HANDLE_DEPOSIT_GAS_LIMIT;
+        const gas = await getGasUse(overrides, gasLimit);
+        let gasUSD = gas.multipliedBy(nativePrice).div(TEN_POW(18 - USDC.decimals));
+        gasUSD = BigNumberJS(gasUSD.toFixed(0));
+        const afterHF = getHFAfterActions(accountData, [
+            {
+                token: USDC,
+                amount: usdcDeposit,
+                tokenPrice: usdcPrice,
+                type: ActionType.DEPOSIT,
+            },
+            {
+                token: USDC,
+                amount: BigNumberJS(user.deposit_amount).multipliedBy(TEN_POW(USDC.decimals)),
+                tokenPrice: usdcPrice,
+                type: ActionType.WITHDRAW,
+            },
+            {
+                token: USDC,
+                amount: gasUSD,
+                tokenPrice: usdcPrice,
+                type: ActionType.WITHDRAW,
+            },
+            {
+                token: USDC,
+                amount: appFee,
+                tokenPrice: usdcPrice,
+                type: ActionType.WITHDRAW,
+            },
+        ]);
+        if (!afterHF.gte(BigNumberJS(1.03))) {
+            const { rows } = await client.query(
+                'INSERT INTO transactions (user_id, descriptions, status) VALUES ($1, $2, $3) RETURNING id',
+                [user.id, [`Deposit failed: insufficient ${USDC.symbol} balance for fee.`], TransactionStatus.FAIL]
+            );
+            await client.query('COMMIT');
+            return;
+        }
 
-        refTransaction.hash = tx.hash;
-        refTransaction.status = TransactionStatus.PENDING;
-        await refTransaction.save();
+        const [txs0, descriptions0] = await depositUSDC(user, usdcDeposit, appFee, gasUSD);
+        txs.push(...txs0);
+        descriptions.push(...descriptions0);
+
+        const to: string[] = txs.map((tx) => tx.to as string);
+        const data: string[] = txs.map((tx) => tx.data as string);
+        const value: string[] = txs.map((tx) => tx.value?.toString() || "0");
+        
+        const { rows: [transaction] } = await client.query(
+            'INSERT INTO transactions (user_id, descriptions, gas) VALUES ($1, $2, $3) RETURNING id',
+            [user.id, descriptions, getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)]
+        );
+
+        const estimatedGas = await walletContract.execute.estimateGas(
+            to,
+            data,
+            value,
+            USDC.address,
+            executor.address,
+            gas.toFixed(0)
+        );
+        
+        let tx;
+        let retries = 3;
+        while (retries > 0) {
+            try {
+                tx = await walletContract.execute(
+                    to,
+                    data,
+                    value,
+                    USDC.address,
+                    executor.address,
+                    gas.toFixed(0),
+                    {
+                        maxFeePerGas: overrides.maxFeePerGas.toFixed(0),
+                        maxPriorityFeePerGas: overrides.maxPriorityFeePerGas.toFixed(0),
+                        gasLimit: calculateGasMargin(estimatedGas),
+                    }
+                );
+                break; // Exit the retry loop if successful
+            } catch (error) {
+                retries--;
+                if (retries === 0) {
+                    console.error(`Transaction failed after 3 attempts for user ${user.address}:`, error);
+                    throw error;
+                }
+                console.log(`Transaction failed for user ${user.address}, retrying... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
+            }
+        }
+        
+        await client.query(
+            'UPDATE transactions SET hash = $1, status = $2 WHERE id = $3',
+            [tx.hash, TransactionStatus.PENDING, transaction.id]
+        );
+
+        if (refAddress !== ethers.ZeroAddress) {
+            await client.query(
+                'INSERT INTO ref_transactions (from_user_id, to_user_id, description, amount, hash, status) VALUES ($1, $2, $3, $4, $5, $6)',
+                [user.id, referrer.id, TransactionType.DEPOSIT_REF, appFee.multipliedBy(10).div(100).toFixed(0), tx.hash, TransactionStatus.PENDING]
+            );
+        }
+
+        await client.query(
+            'UPDATE users SET last_deposited_at = $1, need_update = $2, updated_deposit_amount = $3 WHERE id = $4',
+            [new Date(), true, null, user.id]
+        );
+
+        await client.query('COMMIT');
+        console.log(`Deposit successful for user ${user.address}`);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(`Error in handleDeposit for user ${user.address}:`, error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        throw error;
+    } finally {
+        client.release();
     }
-
-    user.last_deposited_at = new Date();
-    await user.save();
-    await UserEntity.update(
-        {
-            address: user.address,
-        },
-        { need_update: true, updated_deposit_amount: null },
-    );
 };
+
 
 export const main = async (redisClient: RedisClientType, pool: Pool) => {
     try {
         const timestamp = moment().subtract(30, "days").toDate();
-        const usersResult = await pool.query(`
-            SELECT * FROM users 
-            WHERE (deposit_amount > 0 AND deposit_enabled = true AND (last_deposited_at <= $1 OR last_deposited_at IS NULL))
-            ORDER BY last_deposited_at ASC NULLS FIRST
-        `, [timestamp]);
-        const users = usersResult.rows;
+        
+        const query = `
+            SELECT u.*, r.address as referrer_address
+            FROM users u
+            LEFT JOIN users r ON u.referrer_id = r.id
+            WHERE u.deposit_amount > 0 
+            AND u.deposit_enabled = true 
+            AND (u.last_deposited_at <= $1 OR u.last_deposited_at IS NULL)
+            ORDER BY u.last_deposited_at ASC NULLS FIRST
+        `;
+        
+        const { rows: users } = await pool.query(query, [timestamp]);
 
         const cacheKey = 'token_pricing';
         let prices: Record<string, BigNumberJS>;
         const cachedPrices = await redisClient.get(cacheKey);
+        
         if (cachedPrices) {
-            prices = JSON.parse(cachedPrices);
+            prices = JSON.parse(cachedPrices, (key, value) => 
+                typeof value === 'string' ? new BigNumberJS(value) : value
+            );
         } else {
             prices = await getTokenPricing();
             await redisClient.set(cacheKey, JSON.stringify(prices), { EX: 300 }); // Cache for 5 minutes
@@ -335,10 +365,9 @@ export const main = async (redisClient: RedisClientType, pool: Pool) => {
         const overrides = await getOverrides();
 
         await Promise.all(
-            users.map(async (user: UserEntity) => {
+            users.map(async (user) => {
                 try {
-                    // Remove the pool parameter from here
-                    await run(() => handleDeposit(user, prices, overrides));
+                    await handleDeposit(user, prices, overrides, pool);
                 } catch (error) {
                     console.error('Error handling deposit for user:', user.address, error);
                 }

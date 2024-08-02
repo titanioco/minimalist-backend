@@ -2,14 +2,14 @@ import cron from 'node-cron';
 import { RedisClientType } from 'redis';
 import { getPool } from '../database';  // Import the getPool function
 import { main as handleDeposits } from './handleDeposits';
-import { main as handleRefTransactions } from './cronjobs/handleRefTransactions';
-import { main as handleTransactions } from './cronjobs/handleTransactions';
-import { main as handleSwap } from './cronjobs/handleSwap';
-import { main as handleHF } from './cronjobs/handleHF';
-import { main as handleValueRecords } from './cronjobs/handleValueRecords';
-import { main as handleTokenRecords } from './cronjobs/handleTokenRecords';
-import { main as handleUSDCRecords } from './cronjobs/handleUSDCRecords';
-import { main as handleSwapAmount } from './cronjobs/handleSwapAmount';
+import { main as handleRefTransactions } from './handleRefTransactions';
+import { main as handleTransactions } from './handleTransactions';
+import { main as handleSwap } from './handleSwap';
+import { main as handleHF } from './handleHF';
+import { main as handleValueRecords } from './handleValueRecords';
+import { main as handleTokenRecords } from './handleTokenRecords';
+import { main as handleUSDCRecords } from './handleUSDCRecords';
+import { main as handleSwapAmount } from './handleSwapAmount';
 
 export function setupCronJobs(redisClient: RedisClientType) {
   const pool = getPool();  // Get the pool instance

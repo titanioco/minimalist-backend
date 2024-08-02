@@ -6,7 +6,7 @@ import { createClient, RedisClientType } from 'redis';
 import { routeApp } from './src/routers';
 import { errorHandler } from './src/middleware/errorHandler';
 import { setupDatabase } from './src/database';
-import { setupCronJobs } from './src/cronJobs';
+import { setupCronJobs } from './src/cronjobs/cronJobs';
 
 const app: Application = express();
 
