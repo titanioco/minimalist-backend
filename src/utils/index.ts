@@ -1,14 +1,14 @@
+//src\utils\index.ts
 import "dotenv/config";
 import BigNumberJS from "bignumber.js";
-import { BigNumber } from "ethers";
-import { ChainId } from "./types";
+import { ethers } from "ethers";
+import { ChainId } from "./types/types";
 
 export const NETWORK: number = parseInt(
   process.env.NETWORK ?? ChainId.FTM_TESTNET.toString()
 );
 
 export const PRIVATE_KEY: string = process.env.PRIVATE_KEY!;
-
 export const LEDGER_ADDRESS: string = process.env.LEDGER_ADDRESS!;
 
 export const BIG_ZERO = new BigNumberJS(0);
@@ -45,6 +45,6 @@ export const run = async (func: () => Promise<any>, times: number = 10) => {
   throw new Error(error);
 };
 
-export function calculateGasMargin(value: BigNumber): BigNumber {
-  return value.mul(BigNumber.from(180)).div(BigNumber.from(100));
+export function calculateGasMargin(value: ethers.BigNumberish): bigint {
+  return ethers.getBigInt(value) * BigInt(180) / BigInt(100);
 }

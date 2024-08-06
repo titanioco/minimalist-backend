@@ -4,9 +4,10 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { createClient, RedisClientType } from 'redis';
 import { routeApp } from './src/routers';
-import { errorHandler } from './src/middleware/errorHandler';
+import { errorHandlerMiddleware, loggerMiddleware } from './src/middleware/logHandler';
 import { setupDatabase } from './src/database';
 import { setupCronJobs } from './src/cronjobs/cronJobs';
+
 
 const app: Application = express();
 
@@ -20,7 +21,10 @@ redisClient.on('error', (err) => console.log('Redis Client Error', err));
 async function startServer() {
     await redisClient.connect();
 
-    // Middleware
+    // Logger middleware - add this as the first middleware
+    app.use(loggerMiddleware);
+
+    // Other middleware
     app.use(helmet());
     app.use(compression());
     app.use(express.json());
@@ -39,8 +43,8 @@ async function startServer() {
     // Routes
     routeApp(app, redisClient);
 
-    // Error handling middleware
-    app.use(errorHandler);
+    // Error handling middleware - keep this as the last middleware
+    app.use(errorHandlerMiddleware);
 
     const PORT = process.env.PORT || 3000;
 
