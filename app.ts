@@ -1,4 +1,4 @@
-import express, { Application } from 'express';
+import express, { Application, Request, Response } from 'express';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
@@ -7,15 +7,15 @@ import { routeApp } from './src/routers';
 import { errorHandlerMiddleware, loggerMiddleware } from './src/middleware/logHandler';
 import { setupDatabase } from './src/database';
 import { setupCronJobs } from './src/cronjobs/cronJobs';
+import { REDIS_URL, PORT } from './src/utils/enviroments';
+import logger from './src/utils/logger';
 
 const app: Application = express();
 
 // Redis client setup
 const redisClient: RedisClientType = createClient({
-    url: process.env.REDIS_URL,
+    url: REDIS_URL,
     socket: {
-        tls: true,
-        rejectUnauthorized: false, // Only if using self-signed certificates
         reconnectStrategy: (retries) => {
             if (retries > 10) {
                 return new Error('Max retries reached');
@@ -25,8 +25,9 @@ const redisClient: RedisClientType = createClient({
     }
 });
 
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-redisClient.on('connect', () => console.log('Redis Client Connected'));
+redisClient.on('error', (err) => logger.error('Redis Client Error', { error: err }));
+redisClient.on('connect', () => logger.info('Redis Client Connected'));
+redisClient.on('reconnecting', () => logger.info('Redis Client Reconnecting'));
 
 async function startServer() {
     try {
@@ -48,6 +49,15 @@ async function startServer() {
         });
         app.use(limiter);
 
+        // Health check route
+        app.get('/health', (req: Request, res: Response) => {
+            res.status(200).json({ 
+                status: 'OK', 
+                redis: redisClient.isOpen ? 'connected' : 'disconnected',
+                timestamp: new Date().toISOString()
+            });
+        });
+
         // Database setup
         await setupDatabase();
 
@@ -57,21 +67,34 @@ async function startServer() {
         // Error handling middleware - keep this as the last middleware
         app.use(errorHandlerMiddleware);
 
-        const PORT = process.env.PORT || 3000;
-
-        app.listen(PORT, () => {
-            console.log(`Server is running on port ${PORT}`);
+        const server = app.listen(PORT, () => {
+            logger.info(`Server is running on port ${PORT}`);
             
             // Setup and start cron jobs
             setupCronJobs(redisClient);
-            console.log('Cron jobs have been set up');
+            logger.info('Cron jobs have been set up');
         });
+
+        // Graceful shutdown
+        process.on('SIGINT', async () => {
+            logger.info('Shutting down gracefully...');
+            await redisClient.quit();
+            server.close(() => {
+                logger.info('Server closed');
+                process.exit(0);
+            });
+        });
+
     } catch (error) {
-        console.error('Failed to start server:', error);
+        logger.error('Failed to start server:', { error });
         process.exit(1);
     }
 }
 
-startServer().catch(console.error);
+logger.info(`Server starting in ${process.env.NODE_ENV || 'development'} mode`);
+startServer().catch(error => {
+    logger.error('Unhandled error during server startup:', { error });
+    process.exit(1);
+});
 
 export default app;
