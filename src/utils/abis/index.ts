@@ -9,38 +9,38 @@ import Aggregator_ABI from "./Aggregator.json";
 const getContract = (
   abi: any,
   address: string,
-  signer?: ethers.Signer | ethers.providers.Provider
+  signerOrProvider?: ethers.Signer | ethers.Provider
 ) => {
-  const signerOrProvider = signer ?? provider;
-  return new ethers.Contract(address, abi, signerOrProvider);
+  const signerOrProviderToUse = signerOrProvider ?? provider;
+  return new ethers.Contract(address, abi, signerOrProviderToUse);
 };
 
 export const getToken = (
   address: string,
-  signer?: ethers.Signer | ethers.providers.Provider
+  signerOrProvider?: ethers.Signer | ethers.Provider
 ) => {
-  return getContract(ERC20_ABI, address, signer);
+  return getContract(ERC20_ABI, address, signerOrProvider);
 };
 
 export const getIPool = (
   address: string,
-  signer?: ethers.Signer | ethers.providers.Provider
+  signerOrProvider?: ethers.Signer | ethers.Provider
 ) => {
-  return getContract(IPool_ABI, address, signer);
+  return getContract(IPool_ABI, address, signerOrProvider);
 };
 
 export const getWallet = (
   address: string,
-  signer?: ethers.Signer | ethers.providers.Provider
+  signerOrProvider?: ethers.Signer | ethers.Provider
 ) => {
-  return getContract(Wallet_ABI, address, signer);
+  return getContract(Wallet_ABI, address, signerOrProvider);
 };
 
 export const getLedger = (
   address: string,
-  signer?: ethers.Signer | ethers.providers.Provider
+  signerOrProvider?: ethers.Signer | ethers.Provider
 ) => {
-  return getContract(Ledger_ABI, address, signer);
+  return getContract(Ledger_ABI, address, signerOrProvider);
 };
 
 export const getAggregator = (address: string) => {

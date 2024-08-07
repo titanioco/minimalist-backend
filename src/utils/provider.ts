@@ -1,3 +1,4 @@
+import * as ethersV5 from 'ethers-v5';
 import { JsonRpcProvider, Wallet } from "ethers";
 import { ChainId } from "./types/types";
 import { NETWORK, PRIVATE_KEY } from ".";

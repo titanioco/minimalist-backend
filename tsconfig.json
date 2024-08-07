@@ -3,24 +3,25 @@
     "target": "ES2020",
     "module": "commonjs",
     "lib": ["es6", "dom"],
-    "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "baseUrl": ".",
     "paths": {
       "*": ["node_modules/*", "src/types/*"],
-      "ethers": ["./node_modules/ethers"],
-      "ethers-v5": ["./node_modules/ethers-v5"]
+      "ethers": ["node_modules/ethers"],
+      "ethers-v5": ["node_modules/ethers-v5"]
     },
     "resolveJsonModule": true,
     "moduleResolution": "node",
-    "types": ["node", "express"],
+    "types": ["node", "express", "reflect-metadata"],
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "*.ts"],
   "exclude": ["node_modules", "**/*.spec.ts"]
 }

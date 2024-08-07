@@ -1,6 +1,7 @@
-import express, { Application, Request, Response } from 'express';
+import "reflect-metadata";
+import express from 'express';
+import { Request, Response, Application } from 'express-serve-static-core';
 import helmet from 'helmet';
-import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { createClient, RedisClientType } from 'redis';
 import { routeApp } from './src/routers';
@@ -38,7 +39,6 @@ async function startServer() {
 
         // Other middleware
         app.use(helmet());
-        app.use(compression());
         app.use(express.json());
         app.use(express.urlencoded({ extended: true }));
 
@@ -51,8 +51,8 @@ async function startServer() {
 
         // Health check route
         app.get('/health', (req: Request, res: Response) => {
-            res.status(200).json({ 
-                status: 'OK', 
+            res.status(200).json({
+                status: 'OK',
                 redis: redisClient.isOpen ? 'connected' : 'disconnected',
                 timestamp: new Date().toISOString()
             });
