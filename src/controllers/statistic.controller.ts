@@ -1,12 +1,16 @@
 import { Request, Response } from 'express-serve-static-core';
 import { RedisClientType } from 'redis';
-import { getPool } from '../database';
+import { DataSource, Like } from 'typeorm';
 import HttpStatus from '../utils/types/httpStatus';
 import { calculateETHAndBTCSwapped } from '../utils/statistic';
 import { USDC, WBTC, WETH } from '../constants/tokens';
 import _ from 'lodash';
+import { UserEntity } from '../utils/entities/user.entity';
+import { ValueRecordEntity } from '../utils/entities/valueRecord.entity';
+import { TransactionEntity } from '../utils/entities/transaction.entity';
+import { TokenRecordEntity } from '../utils/entities/tokenRecord.entity';
 
-export const statisticController = (redisClient: RedisClientType) => ({
+export const statisticController = (redisClient: RedisClientType, dataSource: DataSource) => ({
   getWalletsLinked: async (req: Request, res: Response) => {
     try {
       const query = req.query || {};
@@ -20,20 +24,23 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const usersResult = await pool.query(
-        'SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
-        [take, skip]
-      );
+      const userRepository = dataSource.getRepository(UserEntity);
+      const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
 
-      const userWithValueRecordPromise = usersResult.rows.map(async (user) => {
-        const valueRecordResult = await pool.query(
-          'SELECT * FROM value_records WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-          [user.id]
-        );
+      const [users, total] = await userRepository.findAndCount({
+        order: { created_at: 'DESC' },
+        take,
+        skip
+      });
+
+      const userWithValueRecordPromise = users.map(async (user) => {
+        const valueRecord = await valueRecordRepository.findOne({
+          where: { user: { address: user.address } },
+          order: { created_at: 'DESC' }
+        });
         return {
           ...user,
-          valueRecord: valueRecordResult.rows[0] || null,
+          valueRecord: valueRecord || null,
         };
       });
 
@@ -60,29 +67,31 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const depositedTransactions = await pool.query(
-        `SELECT u.*, COUNT(t.id) as deposit_count
-         FROM users u
-         JOIN transactions t ON u.id = t.user_id
-         WHERE t.chain_id = $1 AND t.status = $2 AND t.descriptions ILIKE $3
-         GROUP BY u.id
-         HAVING COUNT(t.id) >= 4`,
-        [137, 'success', '%Deposited %']
-      );
+      const userRepository = dataSource.getRepository(UserEntity);
+      const transactionRepository = dataSource.getRepository(TransactionEntity);
+      const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
 
-      const valueRecordPromise = depositedTransactions.rows.map(async (user) => {
-        const valueRecordResult = await pool.query(
-          'SELECT * FROM value_records WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1',
-          [user.id]
-        );
+      const depositedUsers = await userRepository.createQueryBuilder('user')
+        .leftJoinAndSelect('user.transactions', 'transaction')
+        .where('transaction.chain_id = :chainId', { chainId: 137 })
+        .andWhere('transaction.status = :status', { status: 'success' })
+        .andWhere('transaction.descriptions ILIKE :description', { description: '%Deposited %' })
+        .groupBy('user.address')
+        .having('COUNT(transaction.id) >= 4')
+        .getMany();
+
+      const userWithValueRecordPromise = depositedUsers.map(async (user) => {
+        const valueRecord = await valueRecordRepository.findOne({
+          where: { user: { address: user.address } },
+          order: { created_at: 'DESC' }
+        });
         return {
           ...user,
-          valueRecord: valueRecordResult.rows[0] || null,
+          valueRecord: valueRecord || null,
         };
       });
 
-      const userWithValueRecord = await Promise.all(valueRecordPromise);
+      const userWithValueRecord = await Promise.all(userWithValueRecordPromise);
 
       const result = {
         body: userWithValueRecord,
@@ -105,15 +114,17 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const swappedTransactions = await pool.query(
-        `SELECT * FROM transactions 
-         WHERE chain_id = $1 AND status = $2 AND descriptions ILIKE $3`,
-        [137, 'success', '%Swapped %']
-      );
+      const transactionRepository = dataSource.getRepository(TransactionEntity);
+      const swappedTransactions = await transactionRepository.find({
+        where: {
+          chain_id: 137,
+          status: 'success',
+          descriptions: Like('%Swapped %')
+        }
+      });
 
       const result = {
-        body: calculateETHAndBTCSwapped(swappedTransactions.rows),
+        body: calculateETHAndBTCSwapped(swappedTransactions),
         statusCode: HttpStatus.OK,
       };
 
@@ -133,17 +144,17 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const groupedUsers = await pool.query(
-        `SELECT DATE(created_at) as date, COUNT(address) as count
-         FROM users
-         WHERE created_at >= NOW() - INTERVAL '30 days'
-         GROUP BY DATE(created_at)
-         ORDER BY date`
-      );
+      const userRepository = dataSource.getRepository(UserEntity);
+      const groupedUsers = await userRepository.createQueryBuilder('user')
+        .select("DATE(user.created_at)", "date")
+        .addSelect("COUNT(user.address)", "count")
+        .where("user.created_at >= :date", { date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) })
+        .groupBy("DATE(user.created_at)")
+        .orderBy("date", "ASC")
+        .getRawMany();
 
       const result = {
-        body: groupedUsers.rows,
+        body: groupedUsers,
         statusCode: HttpStatus.OK,
       };
 
@@ -163,16 +174,15 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const totalDeposit = await pool.query(
-        `SELECT SUM(value::numeric) as total
-         FROM token_records
-         WHERE type = $1 AND token = $2`,
-        ['deposit', USDC[137]?.address]
-      );
+      const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
+      const totalDeposit = await tokenRecordRepository.createQueryBuilder('token_record')
+        .select('SUM(token_record.value)', 'total')
+        .where('token_record.type = :type', { type: 'deposit' })
+        .andWhere('token_record.token = :token', { token: USDC[137]?.address })
+        .getRawOne();
 
       const result = {
-        body: parseFloat(totalDeposit.rows[0].total) || 0,
+        body: parseFloat(totalDeposit.total) || 0,
         statusCode: HttpStatus.OK,
       };
 
@@ -192,16 +202,15 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const totalWithdraw = await pool.query(
-        `SELECT SUM(value::numeric) as total
-         FROM token_records
-         WHERE type = $1 AND token = $2`,
-        ['withdraw', USDC[137]?.address]
-      );
+      const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
+      const totalWithdraw = await tokenRecordRepository.createQueryBuilder('token_record')
+        .select('SUM(token_record.value)', 'total')
+        .where('token_record.type = :type', { type: 'withdraw' })
+        .andWhere('token_record.token = :token', { token: USDC[137]?.address })
+        .getRawOne();
 
       const result = {
-        body: parseFloat(totalWithdraw.rows[0].total) || 0,
+        body: parseFloat(totalWithdraw.total) || 0,
         statusCode: HttpStatus.OK,
       };
 
@@ -221,16 +230,15 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const totalDeposit = await pool.query(
-        `SELECT SUM(value::numeric * token_price::numeric) as total
-         FROM token_records
-         WHERE type = $1 AND token IN ($2, $3)`,
-        ['deposit', WBTC[137]?.address, WETH[137]?.address]
-      );
+      const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
+      const totalDeposit = await tokenRecordRepository.createQueryBuilder('token_record')
+        .select('SUM(token_record.value * token_record.token_price)', 'total')
+        .where('token_record.type = :type', { type: 'deposit' })
+        .andWhere('token_record.token IN (:...tokens)', { tokens: [WBTC[137]?.address, WETH[137]?.address] })
+        .getRawOne();
 
       const result = {
-        body: parseFloat(totalDeposit.rows[0].total) || 0,
+        body: parseFloat(totalDeposit.total) || 0,
         statusCode: HttpStatus.OK,
       };
 
@@ -250,16 +258,22 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const totalStack = await pool.query(
-        `SELECT chain_id, SUM(value::numeric) as total
-         FROM value_records
-         WHERE created_at = (SELECT MAX(created_at) FROM value_records)
-         GROUP BY chain_id`
-      );
+      const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
+      const totalStack = await valueRecordRepository.createQueryBuilder('value_record')
+        .select('value_record.chain_id', 'chain_id')
+        .addSelect('SUM(value_record.value)', 'total')
+        .where(qb => {
+          const subQuery = qb.subQuery()
+            .select('MAX(created_at)')
+            .from(ValueRecordEntity, 'vr')
+            .getQuery();
+          return 'value_record.created_at = ' + subQuery;
+        })
+        .groupBy('value_record.chain_id')
+        .getRawMany();
 
       const result = {
-        body: totalStack.rows.find(row => row.chain_id === 137)?.total || 0,
+        body: totalStack.find(row => row.chain_id === 137)?.total || 0,
         statusCode: HttpStatus.OK,
       };
 
@@ -279,21 +293,17 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const walletsOutApp = await pool.query(
-        `SELECT COUNT(*) as count
-         FROM (
-           SELECT user_id, SUM(value::numeric) as total_value
-           FROM value_records
-           WHERE chain_id = $1
-           GROUP BY user_id
-           HAVING SUM(value::numeric) < 1
-         ) as subquery`,
-        [137]
-      );
+      const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
+      const walletsOutApp = await valueRecordRepository
+        .createQueryBuilder('value_record')
+        .select('COUNT(DISTINCT value_record.user)', 'count')
+        .where('value_record.chain_id = :chainId', { chainId: 137 })
+        .groupBy('value_record.user')
+        .having('SUM(value_record.value) < 1')
+        .getRawOne();
 
       const result = {
-        body: parseInt(walletsOutApp.rows[0].count),
+        body: parseInt(walletsOutApp.count),
         statusCode: HttpStatus.OK,
       };
 
@@ -313,20 +323,19 @@ export const statisticController = (redisClient: RedisClientType) => ({
         return res.json(JSON.parse(cachedResult));
       }
 
-      const pool = getPool();
-      const groupedUsers = await pool.query(
-        `SELECT 
-           EXTRACT(YEAR FROM created_at) as year, 
-           EXTRACT(MONTH FROM created_at) as month,
-           COUNT(address) as count
-         FROM users
-         WHERE referrer_address IS NOT NULL
-         GROUP BY year, month
-         ORDER BY year, month`
-      );
+      const userRepository = dataSource.getRepository(UserEntity);
+      const groupedUsers = await userRepository
+        .createQueryBuilder('user')
+        .select("EXTRACT(YEAR FROM user.created_at)", "year")
+        .addSelect("EXTRACT(MONTH FROM user.created_at)", "month")
+        .addSelect("COUNT(user.address)", "count")
+        .where("user.referrer IS NOT NULL")
+        .groupBy("year, month")
+        .orderBy("year, month")
+        .getRawMany();
 
       const result = {
-        body: groupedUsers.rows,
+        body: groupedUsers,
         statusCode: HttpStatus.OK,
       };
 

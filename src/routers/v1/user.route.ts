@@ -1,10 +1,11 @@
 import express from 'express';
-import { Router, Request, Response, NextFunction } from 'express-serve-static-core';
+import { Router } from 'express-serve-static-core';
 import { RedisClientType } from 'redis';
+import { DataSource } from 'typeorm';
 import auth, { authRateLimiter } from "../../middleware/auth";
 import { userController } from "../../controllers/user.controller";
 
-const createUserRoute= (redisClient: RedisClientType): Router => {
+const createUserRoute = (redisClient: RedisClientType, dataSource: DataSource): Router => {
     const router = express.Router() as Router;
     
     const {
@@ -15,7 +16,7 @@ const createUserRoute= (redisClient: RedisClientType): Router => {
         register,
         setUserNeedUpdate,
         updateUser
-    } = userController(redisClient);
+    } = userController(redisClient, dataSource);
 
     // Public routes
     router.get("/code/:code", getUserByCode);

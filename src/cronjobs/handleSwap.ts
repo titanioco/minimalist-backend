@@ -1,8 +1,8 @@
-import { Pool } from 'pg';
+import { DataSource, LessThan } from 'typeorm';
 import { RedisClientType } from 'redis';
 import { normalize } from "@aave/math-utils";
 import BigNumberJS from "bignumber.js";
-import { ContractTransaction, ZeroAddress } from "ethers";
+import { ContractTransaction, ethers } from "ethers";
 import moment from "moment";
 import { getIPoolAddress } from "../constants/contracts";
 import { Token, getUSDC, getWBTC, getWETH, getWMATIC } from "../constants/tokens";
@@ -22,6 +22,9 @@ import { fetchExactInTxParams, swapCollateral } from "../utils/paraswap";
 import { APP_FEE_RECEIVER, executor, provider } from "../utils/provider";
 import { TransactionOverrides, getGasUse, getOverrides } from "../utils/transaction";
 import { TransactionStatus, TransactionType } from "../utils/types/types";
+import { TransactionEntity } from '../utils/entities/transaction.entity';
+import { UserEntity } from '../utils/entities/user.entity';
+import { RefTransactionEntity } from '../utils/entities/refTransaction.entity';
 
 const getCycle = (user: any) => {
     if (user.updated_deposit_amount !== null) {
@@ -101,16 +104,19 @@ const swapUSDCToTokens = async (
 };
 
 const handleSwap = async (
-    user: any,
+    user: UserEntity,
     prices: Record<string, BigNumberJS>,
     overrides: TransactionOverrides,
-    pool: Pool
+    dataSource: DataSource
 ) => {
-    const client = await pool.connect();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
         if (!canSwap(user)) return;
         const { referrer } = user;
-        const refAddress = referrer?.address ?? ZeroAddress;
+        const refAddress = referrer?.address ?? ethers.constants.AddressZero;
 
         const USDC = getUSDC();
         const WMATIC = getWMATIC();
@@ -195,17 +201,19 @@ const handleSwap = async (
             },
         ]);
         if (!afterHF.gte(BigNumberJS(1.03))) {
-            await client.query(`
-                INSERT INTO transactions (user_id, descriptions, status)
-                VALUES ($1, $2, $3)
-            `, [user.id, [`Swap failed: insufficient ${USDC.symbol} balance for fee.`], TransactionStatus.FAIL]);
+            const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+            await transactionRepository.save(
+                transactionRepository.create({
+                    user,
+                    descriptions: [`Swap failed: insufficient ${USDC.symbol} balance for fee.`],
+                    status: TransactionStatus.FAIL
+                })
+            );
             
-            await client.query(`
-                UPDATE users
-                SET last_swapped_at = $1
-                WHERE id = $2
-            `, [moment(user.last_swapped_at).add(6, "hours").toDate(), user.id]);
+            user.last_swapped_at = moment(user.last_swapped_at).add(6, "hours").toDate();
+            await queryRunner.manager.save(user);
             
+            await queryRunner.commitTransaction();
             return;
         }
 
@@ -223,7 +231,7 @@ const handleSwap = async (
             txs.push(tx2);
 
             let fee = appFee;
-            if (refAddress !== ZeroAddress) {
+            if (refAddress !== ethers.constants.AddressZero) {
                 const refFee = fee.multipliedBy(10).div(100);
                 fee = fee.minus(refFee);
 
@@ -242,10 +250,15 @@ const handleSwap = async (
             );
             txs.push(tx3);
         } catch (error) {
-            await client.query(`
-                INSERT INTO transactions (user_id, descriptions, status)
-                VALUES ($1, $2, $3)
-            `, [user.id, [`Swap failed: ${(error as Error).message}`], TransactionStatus.FAIL]);
+            const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+            await transactionRepository.save(
+                transactionRepository.create({
+                    user,
+                    descriptions: [`Swap failed: ${(error as Error).message}`],
+                    status: TransactionStatus.FAIL
+                })
+            );
+            await queryRunner.commitTransaction();
             return;
         }
 
@@ -253,11 +266,13 @@ const handleSwap = async (
         const data: string[] = txs.map((tx) => tx.data as string);
         const value: string[] = txs.map((tx) => tx.value?.toString() || "0");
         
-        const { rows: [transaction] } = await client.query(`
-            INSERT INTO transactions (user_id, descriptions, gas)
-            VALUES ($1, $2, $3)
-            RETURNING id
-        `, [user.id, descriptions, getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)]);
+        const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+        let transaction = transactionRepository.create({
+            user,
+            descriptions,
+            gas: getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)
+        });
+        transaction = await transactionRepository.save(transaction);
 
         const estimatedGas = await walletContract.execute.estimateGas(
             to,
@@ -281,68 +296,57 @@ const handleSwap = async (
             },
         );
 
-        await client.query(`
-            UPDATE transactions
-            SET hash = $1, status = $2
-            WHERE id = $3
-        `, [tx.hash, TransactionStatus.PENDING, transaction.id]);
+        transaction.hash = tx.hash;
+        transaction.status = TransactionStatus.PENDING;
+        await transactionRepository.save(transaction);
 
-        if (refAddress !== ZeroAddress) {
-            await client.query(`
-                INSERT INTO ref_transactions (from_user_id, to_user_id, description, amount, hash, status)
-                VALUES ($1, $2, $3, $4, $5, $6)
-            `, [user.id, referrer.id, TransactionType.SWAP_REF, appFee.multipliedBy(10).div(100).toFixed(0), tx.hash, TransactionStatus.PENDING]);
-        }
-
-        await client.query(`
-            UPDATE users
-            SET last_swapped_at = $1
-            WHERE id = $2
-        `, [new Date(), user.id]);
-
-    } catch (error) {
-        console.error('Error in handleSwap:', error);
-        await client.query('ROLLBACK');
-    } finally {
-        client.release();
-    }
-};
-
-export const main = async (redisClient: RedisClientType, pool: Pool) => {
-    try {
-        const { rows: users } = await pool.query(`
-            SELECT u.*, r.address as referrer_address
-            FROM users u
-            LEFT JOIN users r ON u.referrer_id = r.id
-            WHERE u.deposit_enabled = true
-            AND u.last_swapped_at < $1
-        `, [moment().subtract(1, "days").toDate()]);
-
-        const cacheKey = 'token_pricing';
-        let prices: Record<string, BigNumberJS>;
-        const cachedPrices = await redisClient.get(cacheKey);
-        
-        if (cachedPrices) {
-            prices = JSON.parse(cachedPrices, (key, value) => 
-                typeof value === 'string' ? new BigNumberJS(value) : value
+        if (refAddress !== ethers.constants.AddressZero) {
+            const refTransactionRepository = queryRunner.manager.getRepository(RefTransactionEntity);
+            await refTransactionRepository.save(
+                refTransactionRepository.create({
+                    from: user,
+                    to: referrer,
+                    description: TransactionType.SWAP_REF,
+                    amount: appFee.multipliedBy(10).div(100).toFixed(0),
+                    hash: tx.hash,
+                    status: TransactionStatus.PENDING
+                })
             );
-        } else {
-            prices = await getTokenPricing();
-            await redisClient.set(cacheKey, JSON.stringify(prices), { EX: 300 }); // Cache for 5 minutes
         }
 
-        const overrides = await getOverrides();
+        user.last_swapped_at = new Date();
+        await queryRunner.manager.save(user);
 
-        for (const user of users) {
-            try {
-                await handleSwap(user, prices, overrides, pool);
-            } catch (error) {
-                console.error(`Error handling swap for user ${user.address}:`, error);
-            }
-        }
+        await queryRunner.commitTransaction();
+        console.log(`Swap successful for user ${user.address}`);
     } catch (error) {
-        console.error('Error in handleSwap main function:', error);
+        await queryRunner.rollbackTransaction();
+        console.error(`Error in handleSwap for user ${user.address}:`, error);
+    } finally {
+        await queryRunner.release();
     }
 };
 
-export default main;
+export const main = async (redisClient: RedisClientType, dataSource: DataSource) => {
+    const userRepository = dataSource.getRepository(UserEntity);
+    const users = await userRepository.find({
+        where: {
+            deposit_enabled: true,
+            last_swapped_at: LessThan(moment().subtract(1, "days").toDate())
+        },
+        relations: ["referrer"]
+    });
+
+    const prices = await getTokenPricing();
+    const overrides = await getOverrides();
+
+    await Promise.all(
+        users.map(async (user: UserEntity) => {
+            try {
+                await handleSwap(user, prices, overrides, dataSource);
+            } catch (error) {
+                console.error(error);
+            }
+        })
+    );
+};

@@ -1,6 +1,6 @@
 // src/utils/transactionSimulator.ts
 
-import { ethers } from 'ethers';
+import { ethers, providers  } from 'ethers';
 import axios from 'axios';
 import {
    isDevelopment,
@@ -11,7 +11,7 @@ import {
 } from './enviroments';
 import { provider } from './provider';
 
-export async function simulateTransaction(tx: ethers.TransactionRequest): Promise<any> {
+export async function simulateTransaction(tx: providers.TransactionRequest): Promise<any> {
   if (isDevelopment) {
     return simulateWithTenderly(tx);
   } else {
@@ -19,7 +19,7 @@ export async function simulateTransaction(tx: ethers.TransactionRequest): Promis
   }
 }
 
-async function simulateWithTenderly(tx: ethers.TransactionRequest): Promise<any> {
+async function simulateWithTenderly(tx: providers.TransactionRequest): Promise<any> {
   const response = await axios.post(
     `https://api.tenderly.co/api/v1/account/${TENDERLY_USER}/project/${TENDERLY_PROJECT}/fork/${TENDERLY_FORK_ID}/simulate`,
     {
@@ -40,7 +40,7 @@ async function simulateWithTenderly(tx: ethers.TransactionRequest): Promise<any>
   return response.data;
 }
 
-async function simulateWithProvider(tx: ethers.TransactionRequest): Promise<any> {
+async function simulateWithProvider(tx: providers.TransactionRequest): Promise<any> {
   try {
     const gasEstimate = await provider.estimateGas(tx);
     const feeData = await provider.getFeeData();

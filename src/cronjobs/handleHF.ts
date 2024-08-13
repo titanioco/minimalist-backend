@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { DataSource } from 'typeorm';
 import { RedisClientType } from 'redis';
 import BigNumberJS from "bignumber.js";
 import { ContractTransaction } from "ethers";
@@ -21,6 +21,7 @@ import { TransactionOverrides, getGasUse, getOverrides } from "../utils/transact
 import { TransactionStatus } from "../utils/types/types";
 import { swapTokenAToTokenB } from "./handleSwap";
 import { UserEntity } from '../utils/entities/user.entity';
+import { TransactionEntity } from '../utils/entities/transaction.entity';
 
 const getTotalCollateralMissing = (userData: UserAccountData & { hfSafe: BigNumberJS }) => {
     const USDC = getUSDC();
@@ -123,12 +124,15 @@ const handleMissingCollateral = async (
 };
 
 const handleHF = async (
-    user: any,
+    user: UserEntity,
     prices: Record<string, BigNumberJS>,
     overrides: TransactionOverrides,
-    pool: Pool
+    dataSource: DataSource
 ) => {
-    const client = await pool.connect();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
         const USDC = getUSDC();
         const WMATIC = getWMATIC();
@@ -153,10 +157,15 @@ const handleHF = async (
             );
             txs.push(tx0);
         } catch (error) {
-            await client.query(`
-                INSERT INTO transactions (user_id, descriptions, status)
-                VALUES ($1, $2, $3)
-            `, [user.id, [`Handle healthfactor failed: ${(error as Error).message}`], TransactionStatus.FAIL]);
+            const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+            await transactionRepository.save(
+                transactionRepository.create({
+                    user,
+                    descriptions: [`Handle healthfactor failed: ${(error as Error).message}`],
+                    status: TransactionStatus.FAIL
+                })
+            );
+            await queryRunner.commitTransaction();
             return;
         }
 
@@ -164,11 +173,13 @@ const handleHF = async (
         const data: string[] = txs.map((tx) => tx.data as string);
         const value: string[] = txs.map((tx) => tx.value?.toString() || "0");
 
-        const { rows: [transaction] } = await client.query(`
-            INSERT INTO transactions (user_id, descriptions, gas)
-            VALUES ($1, $2, $3)
-            RETURNING id
-        `, [user.id, [`Handled healthfactor.`], getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)]);
+        const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+        let transaction = transactionRepository.create({
+            user,
+            descriptions: [`Handled healthfactor.`],
+            gas: getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)
+        });
+        transaction = await transactionRepository.save(transaction);
 
         const estimatedGas = await walletContract.execute.estimateGas(
             to,
@@ -192,59 +203,41 @@ const handleHF = async (
             }
         );
 
-        await client.query(`
-            UPDATE transactions
-            SET hash = $1, status = $2
-            WHERE id = $3
-        `, [tx.hash, TransactionStatus.PENDING, transaction.id]);
+        transaction.hash = tx.hash;
+        transaction.status = TransactionStatus.PENDING;
+        await transactionRepository.save(transaction);
 
-        await client.query(`
-            UPDATE users
-            SET need_update = true, updated_deposit_amount = null
-            WHERE address = $1
-        `, [user.address]);
+        const userRepository = queryRunner.manager.getRepository(UserEntity);
+        user.need_update = true;
+        user.updated_deposit_amount = null;
+        await userRepository.save(user);
 
-    } finally {
-        client.release();
-    }
-};
-
-export const main = async (redisClient: RedisClientType, pool: Pool) => {
-    try {
-        const { rows: users } = await pool.query(`
-            SELECT u.*, r.address as referrer_address
-            FROM users u
-            LEFT JOIN users r ON u.referrer_id = r.id
-            WHERE u.protection_enabled = true
-        `);
-
-        const cacheKey = 'token_pricing';
-        let prices: Record<string, BigNumberJS>;
-        const cachedPrices = await redisClient.get(cacheKey);
-        
-        if (cachedPrices) {
-            prices = JSON.parse(cachedPrices, (key, value) => 
-                typeof value === 'string' ? new BigNumberJS(value) : value
-            );
-        } else {
-            prices = await getTokenPricing();
-            await redisClient.set(cacheKey, JSON.stringify(prices), { EX: 300 }); // Cache for 5 minutes
-        }
-
-        const overrides = await getOverrides();
-
-        await Promise.all(
-            users.map(async (user: any) => {
-                try {
-                    await handleHF(user, prices, overrides, pool);
-                } catch (error) {
-                    console.error(`Error handling HF for user ${user.address}:`, error);
-                }
-            })
-        );
+        await queryRunner.commitTransaction();
     } catch (error) {
-        console.error('Error in handleHF main function:', error);
+        await queryRunner.rollbackTransaction();
+        console.error(`Error in handleHF for user ${user.address}:`, error);
+    } finally {
+        await queryRunner.release();
     }
 };
 
-export default main;
+export const main = async (redisClient: RedisClientType, dataSource: DataSource) => {
+    const userRepository = dataSource.getRepository(UserEntity);
+    const users = await userRepository.find({
+        where: { protection_enabled: true },
+        relations: ["referrer"]
+    });
+
+    const prices = await getTokenPricing();
+    const overrides = await getOverrides();
+
+    await Promise.all(
+        users.map(async (user: UserEntity) => {
+            try {
+                await handleHF(user, prices, overrides, dataSource);
+            } catch (error) {
+                console.error(error);
+            }
+        })
+    );
+};

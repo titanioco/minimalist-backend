@@ -2,7 +2,6 @@ import winston from 'winston';
 import { Request } from 'express-serve-static-core';
 import { v4 as uuidv4 } from 'uuid';
 
-// Define log levels
 const levels = {
     error: 0,
     warn: 1,
@@ -11,7 +10,6 @@ const levels = {
     debug: 4,
 };
 
-// Define log colors
 const colors = {
     error: 'red',
     warn: 'yellow',
@@ -20,18 +18,16 @@ const colors = {
     debug: 'white',
 };
 
-// Tell winston that you want to link the colors 
 winston.addColors(colors);
 
-// Create the logger
-const logger = winston.createLogger({
+const winstonLogger = winston.createLogger({
     level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
     levels,
     format: winston.format.combine(
         winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
         winston.format.colorize({ all: true }),
         winston.format.printf(
-            (info) => `${info.timestamp} ${info.level}: ${info.message} ${info.requestId ? `[RequestID: ${info.requestId}]` : ''}`,
+            (info) => `${info.timestamp} ${info.level}: ${info.message} ${info.transactionId ? `[TransactionID: ${info.transactionId}]` : ''} ${info.metadata ? JSON.stringify(info.metadata) : ''}`,
         ),
     ),
     transports: [
@@ -44,37 +40,36 @@ const logger = winston.createLogger({
     ],
 });
 
-// Create a stream object with a 'write' function that will be used by `morgan`
-export const stream = {
-    write: (message: string) => {
-        logger.http(message);
-    },
+export const generateTransactionId = () => uuidv4();
+
+export const logWithTransaction = (level: string, message: string, transactionId?: string, metadata?: any) => {
+    winstonLogger.log(level, message, { transactionId, metadata });
 };
 
-// Function to generate a unique ID
-export const generateId = () => uuidv4();
-
-// Function to log requests (with optional ID)
 export const logRequest = (req: Request, message?: string) => {
     const logMessage = message || `${req.method} ${req.url}`;
-    const requestId = (req as any).id;
-    logger.http(logMessage, { requestId });
+    const transactionId = (req as any).transactionId;
+    logWithTransaction('http', logMessage, transactionId);
 };
 
-// Function to log errors (with optional ID)
 export const logError = (err: Error, req?: Request) => {
-    const requestId = req ? (req as any).id : undefined;
-    logger.error(`${err.name}: ${err.message}`, { 
-        requestId, 
-        stack: err.stack 
-    });
+    const transactionId = req ? (req as any).transactionId : undefined;
+    logWithTransaction('error', `${err.name}: ${err.message}`, transactionId, { stack: err.stack });
 };
 
-// Extend the logger with custom methods
-const extendedLogger = {
-    ...logger,
+export const info = (message: string, transactionId?: string, metadata?: any) => logWithTransaction('info', message, transactionId, metadata);
+export const warn = (message: string, transactionId?: string, metadata?: any) => logWithTransaction('warn', message, transactionId, metadata);
+export const error = (message: string, transactionId?: string, metadata?: any) => logWithTransaction('error', message, transactionId, metadata);
+export const http = (message: string, transactionId?: string, metadata?: any) => logWithTransaction('http', message, transactionId, metadata);
+export const debug = (message: string, transactionId?: string, metadata?: any) => logWithTransaction('debug', message, transactionId, metadata);
+
+export default {
+    info,
+    warn,
+    error,
+    http,
+    debug,
     logRequest,
     logError,
+    generateTransactionId,
 };
-
-export default extendedLogger;

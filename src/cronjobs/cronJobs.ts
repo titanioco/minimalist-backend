@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { RedisClientType } from 'redis';
-import { getPool } from '../database';  // Import the getPool function
+import { DataSource } from 'typeorm';
 import { main as handleDeposits } from './handleDeposits';
 import { main as handleRefTransactions } from './handleRefTransactions';
 import { main as handleTransactions } from './handleTransactions';
@@ -11,19 +11,17 @@ import { main as handleTokenRecords } from './handleTokenRecords';
 import { main as handleUSDCRecords } from './handleUSDCRecords';
 import { main as handleSwapAmount } from './handleSwapAmount';
 
-export function setupCronJobs(redisClient: RedisClientType) {
-  const pool = getPool();  // Get the pool instance
-
+export function setupCronJobs(redisClient: RedisClientType, dataSource: DataSource) {
   // Every 1 minute
-  cron.schedule('* * * * *', () => handleTransactions(redisClient, pool));
-  cron.schedule('* * * * *', () => handleRefTransactions(redisClient, pool));
-  cron.schedule('* * * * *', () => handleHF(redisClient, pool));
-  cron.schedule('* * * * *', () => handleTokenRecords(redisClient, pool));
-  cron.schedule('* * * * *', () => handleUSDCRecords(redisClient, pool));
-  cron.schedule('* * * * *', () => handleSwapAmount(redisClient, pool));
+  cron.schedule('* * * * *', () => handleTransactions(redisClient, dataSource));
+  cron.schedule('* * * * *', () => handleRefTransactions(redisClient, dataSource));
+  cron.schedule('* * * * *', () => handleHF(redisClient, dataSource));
+  cron.schedule('* * * * *', () => handleTokenRecords(redisClient, dataSource));
+  cron.schedule('* * * * *', () => handleUSDCRecords(redisClient, dataSource));
+  cron.schedule('* * * * *', () => handleSwapAmount(redisClient, dataSource));
 
   // Every 15 minutes
-  cron.schedule('*/15 * * * *', () => handleDeposits(redisClient, pool));
-  cron.schedule('*/15 * * * *', () => handleSwap(redisClient, pool));
-  cron.schedule('*/15 * * * *', () => handleValueRecords(redisClient, pool));
+  cron.schedule('*/15 * * * *', () => handleDeposits(redisClient, dataSource));
+  cron.schedule('*/15 * * * *', () => handleSwap(redisClient, dataSource));
+  cron.schedule('*/15 * * * *', () => handleValueRecords(redisClient, dataSource));
 }

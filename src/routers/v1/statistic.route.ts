@@ -1,10 +1,11 @@
 import express from "express";
 import { statisticController } from "../../controllers/statistic.controller";
 import { RedisClientType } from 'redis';
+import { DataSource } from 'typeorm';
 
-export const createStatisticRouter = (redisClient: RedisClientType) => {
+export const createStatisticRouter = (redisClient: RedisClientType, dataSource: DataSource) => {
   const router = express.Router();
-  const controller = statisticController(redisClient);
+  const controller = statisticController(redisClient, dataSource);
 
   router.get("/wallets-linked", controller.getWalletsLinked);
   router.get("/wallets-opened-statistic", controller.walletsOpenedStatistic);

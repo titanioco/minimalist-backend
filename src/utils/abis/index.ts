@@ -9,7 +9,7 @@ import Aggregator_ABI from "./Aggregator.json";
 const getContract = (
   abi: any,
   address: string,
-  signerOrProvider?: ethers.Signer | ethers.Provider
+  signerOrProvider?: ethers.Signer | ethers.providers.Provider
 ) => {
   const signerOrProviderToUse = signerOrProvider ?? provider;
   return new ethers.Contract(address, abi, signerOrProviderToUse);
@@ -17,28 +17,28 @@ const getContract = (
 
 export const getToken = (
   address: string,
-  signerOrProvider?: ethers.Signer | ethers.Provider
+  signerOrProvider?: ethers.Signer | ethers.providers.Provider
 ) => {
   return getContract(ERC20_ABI, address, signerOrProvider);
 };
 
 export const getIPool = (
   address: string,
-  signerOrProvider?: ethers.Signer | ethers.Provider
+  signerOrProvider?: ethers.Signer | ethers.providers.Provider
 ) => {
   return getContract(IPool_ABI, address, signerOrProvider);
 };
 
 export const getWallet = (
   address: string,
-  signerOrProvider?: ethers.Signer | ethers.Provider
+  signerOrProvider?: ethers.Signer | ethers.providers.Provider
 ) => {
   return getContract(Wallet_ABI, address, signerOrProvider);
 };
 
 export const getLedger = (
   address: string,
-  signerOrProvider?: ethers.Signer | ethers.Provider
+  signerOrProvider?: ethers.Signer | ethers.providers.Provider
 ) => {
   return getContract(Ledger_ABI, address, signerOrProvider);
 };

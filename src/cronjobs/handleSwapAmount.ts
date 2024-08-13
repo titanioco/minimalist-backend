@@ -1,12 +1,13 @@
-import { Pool } from 'pg';
+import { DataSource } from 'typeorm';
 import { RedisClientType } from 'redis';
 import BigNumberJS from "bignumber.js";
 import { getUSDC, getWBTC, getWETH } from "../constants/tokens";
+import { UserEntity } from "../utils/entities/user.entity";
 import { TEN_POW } from "../utils";
 import { UserAccountData, getBalance, getUserAccountData } from "../utils/aave";
 
 const getUSDCCollateralRemaining = async (
-    user: any,
+    user: UserEntity,
     userData: UserAccountData & { hfSafe: BigNumberJS },
 ) => {
     const USDC = getUSDC();
@@ -25,53 +26,49 @@ const getUSDCCollateralRemaining = async (
     );
 };
 
-const handleSwapAmount = async (user: any, pool: Pool) => {
-    const client = await pool.connect();
+const handleSwapAmount = async (user: UserEntity, dataSource: DataSource) => {
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
         const accountData = await getUserAccountData(user);
         if (accountData.healthFactor.div(TEN_POW(18)).lt(BigNumberJS(1.03))) {
-            await client.query(`
-                UPDATE users 
-                SET need_update = false, updated_deposit_amount = 0 
-                WHERE address = $1
-            `, [user.address]);
+            user.need_update = false;
+            user.updated_deposit_amount = 0;
+            await queryRunner.manager.save(user);
+            await queryRunner.commitTransaction();
             return;
         }
         const usdcRemaining = await getUSDCCollateralRemaining(user, {
             ...accountData,
             hfSafe: BigNumberJS(1.03),
         });
-        await client.query(`
-            UPDATE users 
-            SET need_update = false, updated_deposit_amount = $1 
-            WHERE address = $2
-        `, [usdcRemaining.toNumber(), user.address]);
+        user.need_update = false;
+        user.updated_deposit_amount = usdcRemaining.toNumber();
+        await queryRunner.manager.save(user);
+        await queryRunner.commitTransaction();
     } catch (error) {
+        await queryRunner.rollbackTransaction();
         console.error(`Error in handleSwapAmount for user ${user.address}:`, error);
     } finally {
-        client.release();
+        await queryRunner.release();
     }
 };
 
-export const main = async (redisClient: RedisClientType, pool: Pool) => {
-    try {
-        const { rows: users } = await pool.query(`
-            SELECT * FROM users 
-            WHERE need_update = true
-        `);
+export const main = async (redisClient: RedisClientType, dataSource: DataSource) => {
+    const userRepository = dataSource.getRepository(UserEntity);
+    const users = await userRepository.find({
+        where: { need_update: true }
+    });
 
-        await Promise.all(
-            users.map(async (user: any) => {
-                try {
-                    await handleSwapAmount(user, pool);
-                } catch (error) {
-                    console.error(`Error handling swap amount for user ${user.address}:`, error);
-                }
-            })
-        );
-    } catch (error) {
-        console.error('Error in handleSwapAmount main function:', error);
-    }
+    await Promise.all(
+        users.map(async (user: UserEntity) => {
+            try {
+                await handleSwapAmount(user, dataSource);
+            } catch (error) {
+                console.error(error);
+            }
+        })
+    );
 };
-
-export default main;

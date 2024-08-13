@@ -1,10 +1,11 @@
 import { userController } from "../../controllers/user.controller";
 import express from "express";
 import { RedisClientType } from 'redis';
+import { DataSource } from 'typeorm';
 
-export const createMainRoute = (redisClient: RedisClientType) => {
+export const createMainRoute = (redisClient: RedisClientType, dataSource: DataSource) => {
     const router = express.Router();
-    const { getNonce, getUsers } = userController(redisClient);
+    const { getNonce, getUsers } = userController(redisClient, dataSource);
 
     router.get("/nonce/:address", getNonce);
     router.get("/users", getUsers);

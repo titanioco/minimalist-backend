@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers, utils } from "ethers";
 import BigNumber from "bignumber.js";
 import axios from "axios";
 import { provider } from "./provider";
@@ -12,11 +12,11 @@ export const getOverrides = async (): Promise<TransactionOverrides> => {
   const { data } = await axios.get(
     "https://gasstation.polygon.technology/v2"
   );
-  const maxFeePerGas = ethers.parseUnits(
+  const maxFeePerGas = utils.parseUnits(
     Math.ceil(data.fast.maxFee).toString(),
     "gwei"
   );
-  const maxPriorityFeePerGas = ethers.parseUnits(
+  const maxPriorityFeePerGas = utils.parseUnits(
     Math.ceil(data.fast.maxPriorityFee).toString(),
     "gwei"
   );

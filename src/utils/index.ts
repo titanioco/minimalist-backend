@@ -1,7 +1,7 @@
 //src\utils\index.ts
 import "dotenv/config";
 import BigNumberJS from "bignumber.js";
-import { ethers } from "ethers";
+import { ethers, BigNumber  } from "ethers";
 import { ChainId } from "./types/types";
 
 export const NETWORK: number = parseInt(
@@ -45,6 +45,7 @@ export const run = async (func: () => Promise<any>, times: number = 10) => {
   throw new Error(error);
 };
 
-export function calculateGasMargin(value: ethers.BigNumberish): bigint {
-  return ethers.getBigInt(value) * BigInt(180) / BigInt(100);
+export function calculateGasMargin(value: BigNumber | string | number): BigNumber {
+  const bigNumberValue = BigNumber.from(value);
+  return bigNumberValue.mul(180).div(100);
 }

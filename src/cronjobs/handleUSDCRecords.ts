@@ -1,5 +1,8 @@
-import { Pool } from 'pg';
+import { DataSource } from 'typeorm';
 import { RedisClientType } from 'redis';
+import { USDCConfigEntity } from '../utils/entities/usdcConfig.entity';
+import { TokenRecordEntity } from '../utils/entities/tokenRecord.entity';
+import { UserEntity } from "../utils/entities/user.entity";
 import BigNumberJS from "bignumber.js";
 import { getToken } from "../utils/abis";
 import { provider } from "../utils/provider";
@@ -7,24 +10,21 @@ import { TokenRecordType } from "../utils/types/types";
 import { getStartBlock } from "../constants/contracts";
 import { Token, getUSDC } from "../constants/tokens";
 import { getBalanceAmount } from "../utils";
-import { Log, EventLog } from 'ethers';
-
-// Type guard to check if the event is an EventLog
-function isEventLog(event: Log | EventLog): event is EventLog {
-    return 'args' in event;
-}
 
 const handleTokenRecord = async (
-    users: any[],
+    users: UserEntity[],
     token: Token,
     startBlock: number,
     endBlock: number,
-    pool: Pool
+    dataSource: DataSource
 ) => {
-    const client = await pool.connect();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
-        const addresses = users.map((user: any) => user.address);
-        const wallets = users.map((user: any) => user.wallet_address);
+        const addresses = users.map((user) => user.address);
+        const wallets = users.map((user) => user.wallet_address);
         const tokenContract = getToken(token.address);
         const filter0 = tokenContract.filters.Transfer(null, wallets, null);
         const filter1 = tokenContract.filters.Transfer(wallets, null, null);
@@ -33,95 +33,83 @@ const handleTokenRecord = async (
         const events = events0.concat(events1);
         const price = "1";
 
+        const tokenRecordRepository = queryRunner.manager.getRepository(TokenRecordEntity);
+        const tokenRecords: TokenRecordEntity[] = [];
+
         for (const event of events) {
-            const blockNumber = event.blockNumber;
-            const logIndex = 'logIndex' in event ? event.logIndex : 0;
-            const transactionHash = event.transactionHash;
+            const { blockNumber, logIndex, transactionHash } = event;
+            const { from, to, value } = event.args!;
 
-            let from: string | undefined;
-            let to: string | undefined;
-            let value: BigNumberJS | undefined;
-
-            if (isEventLog(event) && event.args) {
-                [from, to, value] = event.args;
-            } else {
-                console.warn('Event does not have expected structure:', event);
-                continue;
-            }
-
-            if (from && to && value) {
-                if (wallets.includes(from) && addresses.includes(to)) {
-                    await client.query(`
-                        INSERT INTO token_records (user_id, block_number, log_index, hash, type, token, token_price, value)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    `, [
-                        users.find((user: any) => user.wallet_address === from)?.id,
-                        blockNumber,
-                        logIndex,
-                        transactionHash,
-                        TokenRecordType.WITHDRAW,
-                        token.address,
-                        price,
-                        getBalanceAmount(BigNumberJS(value.toString()), token.decimals).toString(),
-                    ]);
+            if (wallets.includes(from) && addresses.includes(to)) {
+                const user = users.find((user) => user.wallet_address === from);
+                if (user) {
+                    tokenRecords.push(tokenRecordRepository.create({
+                        user,
+                        block_number: blockNumber,
+                        log_index: logIndex,
+                        hash: transactionHash,
+                        type: TokenRecordType.WITHDRAW,
+                        token: token.address,
+                        token_price: price,
+                        value: getBalanceAmount(BigNumberJS(value.toString()), token.decimals).toString()
+                    }));
                 }
-                if (addresses.includes(from) && wallets.includes(to)) {
-                    await client.query(`
-                        INSERT INTO token_records (user_id, block_number, log_index, hash, type, token, token_price, value)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                    `, [
-                        users.find((user: any) => user.wallet_address === to)?.id,
-                        blockNumber,
-                        logIndex,
-                        transactionHash,
-                        TokenRecordType.DEPOSIT,
-                        token.address,
-                        price,
-                        getBalanceAmount(BigNumberJS(value.toString()), token.decimals).toString(),
-                    ]);
+            }
+            if (addresses.includes(from) && wallets.includes(to)) {
+                const user = users.find((user) => user.wallet_address === to);
+                if (user) {
+                    tokenRecords.push(tokenRecordRepository.create({
+                        user,
+                        block_number: blockNumber,
+                        log_index: logIndex,
+                        hash: transactionHash,
+                        type: TokenRecordType.DEPOSIT,
+                        token: token.address,
+                        token_price: price,
+                        value: getBalanceAmount(BigNumberJS(value.toString()), token.decimals).toString()
+                    }));
                 }
             }
         }
+
+        if (tokenRecords.length > 0) {
+            await tokenRecordRepository.save(tokenRecords);
+        }
+
+        await queryRunner.commitTransaction();
+    } catch (error) {
+        await queryRunner.rollbackTransaction();
+        console.error(`Error in handleTokenRecord for USDC:`, error);
     } finally {
-        client.release();
+        await queryRunner.release();
     }
 };
 
-export const main = async (redisClient: RedisClientType, pool: Pool) => {
-    const client = await pool.connect();
+export const main = async (redisClient: RedisClientType, dataSource: DataSource) => {
+    const usdcConfigRepository = dataSource.getRepository(USDCConfigEntity);
+    let config = await usdcConfigRepository.findOne({});
+    if (!config) {
+        config = usdcConfigRepository.create({
+            block_number: getStartBlock(),
+        });
+        config = await usdcConfigRepository.save(config);
+    }
+
+    const userRepository = dataSource.getRepository(UserEntity);
+    const users = await userRepository.find();
+    const USDC = getUSDC();
+
+    const BLOCKS = 3000;
+    const startBlock = config.block_number;
+    const endBlock = Math.min(startBlock + BLOCKS, await provider.getBlockNumber());
+    if (startBlock >= endBlock) {
+        return;
+    }
+
     try {
-        let config = await client.query('SELECT * FROM usdc_config LIMIT 1');
-        if (config.rows.length === 0) {
-            await client.query(`
-                INSERT INTO usdc_config (block_number)
-                VALUES ($1)
-            `, [getStartBlock()]);
-            config = await client.query('SELECT * FROM usdc_config LIMIT 1');
-        }
-
-        const { rows: users } = await client.query('SELECT * FROM users');
-        const USDC = getUSDC();
-
-        const BLOCKS = 3000;
-        const startBlock = config.rows[0].block_number;
-        const endBlock = Math.min(startBlock + BLOCKS, await provider.getBlockNumber());
-        if (startBlock >= endBlock) {
-            return;
-        }
-
-        try {
-            await handleTokenRecord(users, USDC, startBlock, endBlock, pool);
-            await client.query(`
-                UPDATE usdc_config
-                SET block_number = $1
-                WHERE id = $2
-            `, [endBlock, config.rows[0].id]);
-        } catch (error) {
-            console.error('Error in handleUSDCRecords:', error);
-        }
-    } finally {
-        client.release();
+        await handleTokenRecord(users, USDC, startBlock, endBlock, dataSource);
+        await usdcConfigRepository.update(config.id, { block_number: endBlock });
+    } catch (error) {
+        console.error(error);
     }
 };
-
-export default main;

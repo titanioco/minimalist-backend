@@ -1,9 +1,8 @@
 import { RedisClientType } from 'redis';
-import { Pool } from 'pg';
+import { DataSource, LessThanOrEqual, MoreThan, IsNull } from 'typeorm';
 import moment from "moment";
 import BigNumberJS from "bignumber.js";
-import { ethers } from "ethers";
-import { LessThanOrEqual, MoreThan } from "typeorm";
+import { providers, constants, ethers } from 'ethers';
 import { getIPoolAddress } from "../constants/contracts";
 import { getUSDC, getWMATIC, Token } from "../constants/tokens";
 import { calculateGasMargin, getBalanceAmount, run, TEN_POW } from "../utils";
@@ -27,7 +26,7 @@ import { TransactionStatus, TransactionType } from "../utils/types/types";
 import { RefTransactionEntity } from "../utils/entities/refTransaction.entity";
 import { normalize } from "@aave/math-utils";
 
-type PopulatedTransaction = ethers.TransactionRequest;
+type PopulatedTransaction = providers.TransactionRequest;
 
 
 const checkAndApprove = async (
@@ -37,12 +36,12 @@ const checkAndApprove = async (
 ): Promise<PopulatedTransaction[]> => {
     const tokenContract = getToken(tokenAddress, provider);
     const allowance = await tokenContract.allowance(owner, spender);
-    if (allowance > (ethers.MaxUint256 / 100n)) {
-        return [];
-    }
+    if (allowance.sub(ethers.constants.MaxUint256.div(100)).gt(0)) {
+		return [];
+	}
     const tx = await tokenContract.approve.populateTransaction(
         spender,
-        ethers.MaxUint256
+        constants.MaxUint256
     );
     return [tx];
 };
@@ -89,13 +88,13 @@ const depositUSDC = async (
     amount: BigNumberJS,
     appFee: BigNumberJS,
     txFee: BigNumberJS,
-): Promise<[ethers.TransactionRequest[], string[]]> => {
-    const txs: ethers.TransactionRequest[] = [];
+): Promise<[PopulatedTransaction[], string[]]> => {
+    const txs: PopulatedTransaction[] = [];
     const USDC = getUSDC();
     const iPoolContract = getIPool(getIPoolAddress(), provider);
     const usdcContract = getToken(USDC.address, provider);
     const { referrer } = user;
-    const refAddress = referrer?.address ?? ethers.ZeroAddress;
+    const refAddress = referrer?.address ?? ethers.constants.AddressZero;
 
     // Set E-Mode
     const mode = await iPoolContract.getUserEMode(user.wallet_address);
@@ -149,7 +148,7 @@ const depositUSDC = async (
     );
     txs.push(tx5);
 
-    if (refAddress !== ethers.ZeroAddress) {
+    if (refAddress !== ethers.constants.AddressZero) {
         const refFee = appFee.multipliedBy(10).div(100);
         appFee = appFee.minus(refFee);
 
@@ -176,23 +175,24 @@ const depositUSDC = async (
 };
 
 const handleDeposit = async (
-    user: any,
+    user: UserEntity,
     prices: Record<string, BigNumberJS>,
     overrides: TransactionOverrides,
-    pool: Pool
+    dataSource: DataSource
 ) => {
-    const client = await pool.connect(); 
-    try {
-        await client.query('BEGIN');
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
+    try {
         const { referrer } = user;
-        const refAddress = referrer?.address ?? ethers.ZeroAddress;
+        const refAddress = referrer?.address ?? ethers.constants.AddressZero;
 
         const walletContract = getWallet(user.wallet_address, executor);
         const USDC = getUSDC();
         const WMATIC = getWMATIC();
         const { [WMATIC.symbol]: nativePrice, [USDC.symbol]: usdcPrice } = prices;
-        const txs: ethers.TransactionRequest[] = [];
+        const txs: PopulatedTransaction[] = [];
         const descriptions: string[] = [];
         const accountData = await getUserAccountData(user);
         const usdcBalance = await getBalance(USDC.address, user.address);
@@ -202,11 +202,15 @@ const handleDeposit = async (
             .div(100);
 
         if (!usdcBalance.gte(usdcDeposit)) {
-            const { rows } = await client.query(
-                'INSERT INTO transactions (user_id, descriptions, status) VALUES ($1, $2, $3) RETURNING id',
-                [user.id, [`Deposit failed: insufficient ${USDC.symbol} balance.`], TransactionStatus.FAIL]
+            const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+            await transactionRepository.save(
+                transactionRepository.create({
+                    user,
+                    descriptions: [`Deposit failed: insufficient ${USDC.symbol} balance.`],
+                    status: TransactionStatus.FAIL
+                })
             );
-            await client.query('COMMIT');
+            await queryRunner.commitTransaction();
             return;
         }
 
@@ -244,11 +248,15 @@ const handleDeposit = async (
             },
         ]);
         if (!afterHF.gte(BigNumberJS(1.03))) {
-            const { rows } = await client.query(
-                'INSERT INTO transactions (user_id, descriptions, status) VALUES ($1, $2, $3) RETURNING id',
-                [user.id, [`Deposit failed: insufficient ${USDC.symbol} balance for fee.`], TransactionStatus.FAIL]
+            const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+            await transactionRepository.save(
+                transactionRepository.create({
+                    user,
+                    descriptions: [`Deposit failed: insufficient ${USDC.symbol} balance for fee.`],
+                    status: TransactionStatus.FAIL
+                })
             );
-            await client.query('COMMIT');
+            await queryRunner.commitTransaction();
             return;
         }
 
@@ -260,10 +268,13 @@ const handleDeposit = async (
         const data: string[] = txs.map((tx) => tx.data as string);
         const value: string[] = txs.map((tx) => tx.value?.toString() || "0");
         
-        const { rows: [transaction] } = await client.query(
-            'INSERT INTO transactions (user_id, descriptions, gas) VALUES ($1, $2, $3) RETURNING id',
-            [user.id, descriptions, getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)]
-        );
+        const transactionRepository = queryRunner.manager.getRepository(TransactionEntity);
+        let transaction = transactionRepository.create({
+            user,
+            descriptions,
+            gas: getBalanceAmount(gasUSD, USDC.decimals).toFixed(2)
+        });
+        transaction = await transactionRepository.save(transaction);
 
         const estimatedGas = await walletContract.execute.estimateGas(
             to,
@@ -303,51 +314,63 @@ const handleDeposit = async (
             }
         }
         
-        await client.query(
-            'UPDATE transactions SET hash = $1, status = $2 WHERE id = $3',
-            [tx.hash, TransactionStatus.PENDING, transaction.id]
-        );
+        transaction.hash = tx.hash;
+        transaction.status = TransactionStatus.PENDING;
+        await transactionRepository.save(transaction);
 
-        if (refAddress !== ethers.ZeroAddress) {
-            await client.query(
-                'INSERT INTO ref_transactions (from_user_id, to_user_id, description, amount, hash, status) VALUES ($1, $2, $3, $4, $5, $6)',
-                [user.id, referrer.id, TransactionType.DEPOSIT_REF, appFee.multipliedBy(10).div(100).toFixed(0), tx.hash, TransactionStatus.PENDING]
+        if (refAddress !== ethers.constants.AddressZero) {
+            const refTransactionRepository = queryRunner.manager.getRepository(RefTransactionEntity);
+            await refTransactionRepository.save(
+                refTransactionRepository.create({
+                    from: user,
+                    to: referrer,
+                    description: TransactionType.DEPOSIT_REF,
+                    amount: appFee.multipliedBy(10).div(100).toFixed(0),
+                    hash: tx.hash,
+                    status: TransactionStatus.PENDING
+                })
             );
         }
 
-        await client.query(
-            'UPDATE users SET last_deposited_at = $1, need_update = $2, updated_deposit_amount = $3 WHERE id = $4',
-            [new Date(), true, null, user.id]
-        );
+        const userRepository = queryRunner.manager.getRepository(UserEntity);
+        user.last_deposited_at = new Date();
+        user.need_update = true;
+        user.updated_deposit_amount = null;
+        await userRepository.save(user);
 
-        await client.query('COMMIT');
+        await queryRunner.commitTransaction();
         console.log(`Deposit successful for user ${user.address}`);
     } catch (error) {
-        await client.query('ROLLBACK');
+        await queryRunner.rollbackTransaction();
         console.error(`Error in handleDeposit for user ${user.address}:`, error);
         console.error('Error details:', JSON.stringify(error, null, 2));
         throw error;
     } finally {
-        client.release();
+        await queryRunner.release();
     }
 };
 
-
-export const main = async (redisClient: RedisClientType, pool: Pool) => {
+export const main = async (redisClient: RedisClientType, dataSource: DataSource) => {
     try {
         const timestamp = moment().subtract(30, "days").toDate();
         
-        const query = `
-            SELECT u.*, r.address as referrer_address
-            FROM users u
-            LEFT JOIN users r ON u.referrer_id = r.id
-            WHERE u.deposit_amount > 0 
-            AND u.deposit_enabled = true 
-            AND (u.last_deposited_at <= $1 OR u.last_deposited_at IS NULL)
-            ORDER BY u.last_deposited_at ASC NULLS FIRST
-        `;
-        
-        const { rows: users } = await pool.query(query, [timestamp]);
+        const userRepository = dataSource.getRepository(UserEntity);
+        const users = await userRepository.find({
+            where: [
+                { 
+                    deposit_amount: MoreThan(0),
+                    deposit_enabled: true,
+                    last_deposited_at: LessThanOrEqual(timestamp)
+                },
+                { 
+                    deposit_amount: MoreThan(0),
+                    deposit_enabled: true,
+                    last_deposited_at: IsNull()
+                }
+            ],
+            relations: ["referrer"],
+            order: { last_deposited_at: "ASC" }
+        });
 
         const cacheKey = 'token_pricing';
         let prices: Record<string, BigNumberJS>;
@@ -367,7 +390,7 @@ export const main = async (redisClient: RedisClientType, pool: Pool) => {
         await Promise.all(
             users.map(async (user) => {
                 try {
-                    await handleDeposit(user, prices, overrides, pool);
+                    await handleDeposit(user, prices, overrides, dataSource);
                 } catch (error) {
                     console.error('Error handling deposit for user:', user.address, error);
                 }

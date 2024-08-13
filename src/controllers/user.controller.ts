@@ -1,8 +1,7 @@
 import { Request, Response } from 'express-serve-static-core';
 import { RedisClientType } from 'redis';
-import { getPool } from '../database';
-import { isAddress, getAddress } from 'ethers';
-import { ethers } from 'ethers';
+import { DataSource, MoreThanOrEqual } from 'typeorm';
+import { utils, ethers } from 'ethers';
 import _ from 'lodash';
 import moment from 'moment';
 import { getLedger } from '../utils/abis';
@@ -12,9 +11,15 @@ import { TransactionStatus, TokenRecordType } from '../utils/types/types';
 import { getTokenPricing } from '../utils/aave';
 import { getWBTC, getWETH } from '../constants/tokens';
 import HttpStatus from '../utils/types/httpStatus';
+import { UserEntity } from '../utils/entities/user.entity';
+import { TransactionEntity } from '../utils/entities/transaction.entity';
+import { RefTransactionEntity } from '../utils/entities/refTransaction.entity';
+import { ValueRecordEntity } from '../utils/entities/valueRecord.entity';
+import { TokenRecordEntity } from '../utils/entities/tokenRecord.entity';
 
+const { isAddress, getAddress } = utils;
 
-export const userController = (redisClient: RedisClientType) => ({
+export const userController = (redisClient: RedisClientType, dataSource: DataSource) => ({
     getNonce: async (req: Request, res: Response) => {
         try {
             const { address } = req.params;
@@ -22,15 +27,15 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.status(400).json({ message: 'Invalid address' });
             }
 
-            const pool = getPool();
-            const result = await pool.query('SELECT nonce FROM users WHERE address = $1', [getAddress(address)]);
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ where: { address: getAddress(address) } });
 
-            if (result.rows.length === 0) {
+            if (!user) {
                 return res.json({ data: '0' });
             }
 
-            const newNonce = result.rows[0].nonce + 1;
-            await pool.query('UPDATE users SET nonce = $1 WHERE address = $2', [newNonce, getAddress(address)]);
+            const newNonce = user.nonce + 1;
+            await userRepository.update({ address: getAddress(address) }, { nonce: newNonce });
 
             res.json({ data: newNonce.toString() });
         } catch (error) {
@@ -52,17 +57,16 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.json({ data: JSON.parse(cachedUser) });
             }
 
-            const pool = getPool();
-            const result = await pool.query(
-                'SELECT u.*, r.address AS referrer_address FROM users u LEFT JOIN users r ON u.referrer_id = r.id WHERE u.address = $1',
-                [getAddress(address)]
-            );
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ 
+                where: { address: getAddress(address) },
+                relations: ['referrer']
+            });
 
-            if (result.rows.length === 0) {
+            if (!user) {
                 return res.status(404).json({ message: 'User not found' });
             }
 
-            const user = result.rows[0];
             await redisClient.set(cacheKey, JSON.stringify(user), { EX: 3600 });
             res.json({ data: user });
         } catch (error) {
@@ -84,17 +88,16 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.json({ data: JSON.parse(cachedUser) });
             }
 
-            const pool = getPool();
-            const result = await pool.query(
-                'SELECT u.*, r.address AS referrer_address FROM users u LEFT JOIN users r ON u.referrer_id = r.id WHERE u.code = $1',
-                [code]
-            );
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ 
+                where: { code },
+                relations: ['referrer']
+            });
 
-            if (result.rows.length === 0) {
+            if (!user) {
                 return res.status(404).json({ message: 'User not found' });
             }
 
-            const user = result.rows[0];
             await redisClient.set(cacheKey, JSON.stringify(user), { EX: 3600 });
             res.json({ data: user });
         } catch (error) {
@@ -111,11 +114,11 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.json({ data: JSON.parse(cachedUsers) });
             }
 
-            const pool = getPool();
-            const result = await pool.query('SELECT * FROM users');
+            const userRepository = dataSource.getRepository(UserEntity);
+            const users = await userRepository.find();
 
-            await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 300 }); // Cache for 5 minutes
-            res.json({ data: result.rows });
+            await redisClient.set(cacheKey, JSON.stringify(users), { EX: 300 }); // Cache for 5 minutes
+            res.json({ data: users });
         } catch (error) {
             console.error('Error in getUsers:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -135,14 +138,13 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.json({ data: JSON.parse(cachedChildren) });
             }
 
-            const pool = getPool();
-            const result = await pool.query(
-                'SELECT u.* FROM users u INNER JOIN users r ON u.referrer_id = r.id WHERE r.address = $1',
-                [getAddress(address)]
-            );
+            const userRepository = dataSource.getRepository(UserEntity);
+            const children = await userRepository.find({
+                where: { referrer: { address: getAddress(address) } },
+            });
 
-            await redisClient.set(cacheKey, JSON.stringify(result.rows), { EX: 300 }); // Cache for 5 minutes
-            res.json({ data: result.rows });
+            await redisClient.set(cacheKey, JSON.stringify(children), { EX: 300 }); // Cache for 5 minutes
+            res.json({ data: children });
         } catch (error) {
             console.error('Error in getChildren:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -158,39 +160,41 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.status(400).json({ message: 'Invalid address' });
             }
 
-            const pool = getPool();
-            const existingUser = await pool.query('SELECT * FROM users WHERE address = $1', [getAddress(address)]);
-            if (existingUser.rows.length > 0) {
+            const userRepository = dataSource.getRepository(UserEntity);
+            const existingUser = await userRepository.findOne({ where: { address: getAddress(address) } });
+            if (existingUser) {
                 return res.status(400).json({ message: 'User already exists' });
             }
 
             const ledgerContract = getLedger(getLedgerAddress(), provider);
             const walletAddress = await ledgerContract.getWallet(getAddress(address));
-            if (walletAddress === ethers.ZeroAddress) {
+            if (walletAddress === ethers.constants.AddressZero) {
                 return res.status(400).json({ message: 'Something went wrong' });
             }
 
             const userAddress = getAddress(address);
             const userCode = userAddress.slice(2, 6) + userAddress.slice(userAddress.length - 4);
 
-            let referrerId = null;
+            let referrer = null;
             if (code) {
-                const referrer = await pool.query('SELECT id FROM users WHERE code = $1', [code]);
-                if (referrer.rows.length > 0) {
-                    referrerId = referrer.rows[0].id;
-                }
+                referrer = await userRepository.findOne({ where: { code } });
             }
 
-            const newUser = await pool.query(
-                'INSERT INTO users (address, code, wallet_address, recipient, referrer_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-                [userAddress, userCode, walletAddress, userAddress, referrerId]
-            );
+            const newUser = userRepository.create({
+                address: userAddress,
+                code: userCode,
+                wallet_address: walletAddress,
+                recipient: userAddress,
+                referrer: referrer
+            });
+
+            await userRepository.save(newUser);
 
             // Invalidate relevant caches
             await redisClient.del(`user:${userAddress}`);
             await redisClient.del('all:users');
 
-            res.status(201).json({ data: newUser.rows[0] });
+            res.status(201).json({ data: newUser });
         } catch (error) {
             console.error('Error in register:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -205,10 +209,10 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
             }
     
-            const pool = getPool();
-            const userResult = await pool.query('SELECT * FROM users WHERE address = $1', [getAddress(userAddress)]);
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ where: { address: getAddress(userAddress) } });
             
-            if (userResult.rows.length === 0) {
+            if (!user) {
                 return res.status(HttpStatus.BadRequest).json({ message: "User not found" });
             }
     
@@ -225,41 +229,39 @@ export const userController = (redisClient: RedisClientType) => ({
                 "last_swapped_at",
             ];
     
-            const updateValues = updateFields.map(field => data[field]);
-            const updateQuery = `UPDATE users SET ${updateFields.map((field, index) => `${field} = $${index + 2}`).join(', ')} WHERE address = $1 RETURNING *`;
-            
-            const updatedUserResult = await pool.query(updateQuery, [getAddress(userAddress), ...updateValues]);
-            const updatedUser = updatedUserResult.rows[0];
+            updateFields.forEach(field => {
+                if (data[field] !== undefined) {
+                    user[field] = data[field];
+                }
+            });
+    
+            const updatedUser = await userRepository.save(user);
     
             if (data.transactions) {
-                const transactionValues = data.transactions.map((transaction: any) => [
-                    updatedUser.id,
-                    transaction.hash,
-                    JSON.stringify(transaction.descriptions),
-                    TransactionStatus.SUCCESS
-                ]);
-                
-                await pool.query(
-                    'INSERT INTO transactions (user_id, hash, descriptions, status) VALUES ' +
-                    transactionValues.map((_: any, index: number) => `($${index * 4 + 1}, $${index * 4 + 2}, $${index * 4 + 3}, $${index * 4 + 4})`).join(', '),
-                    transactionValues.flat()
+                const transactionRepository = dataSource.getRepository(TransactionEntity);
+                const transactions = data.transactions.map((transaction: any) => 
+                    transactionRepository.create({
+                        user: updatedUser,
+                        hash: transaction.hash,
+                        descriptions: transaction.descriptions,
+                        status: TransactionStatus.SUCCESS
+                    })
                 );
+                await transactionRepository.save(transactions);
             }
     
-            if (data.refTransactions && updatedUser.referrer_id) {
-                const refTransactionValues = data.refTransactions.map((transaction: any) => [
-                    updatedUser.id,
-                    updatedUser.referrer_id,
-                    transaction.hash,
-                    transaction.description,
-                    TransactionStatus.SUCCESS
-                ]);
-                
-                await pool.query(
-                    'INSERT INTO ref_transactions (from_id, to_id, hash, description, status) VALUES ' +
-                    refTransactionValues.map((_: any, index: number) => `($${index * 5 + 1}, $${index * 5 + 2}, $${index * 5 + 3}, $${index * 5 + 4}, $${index * 5 + 5})`).join(', '),
-                    refTransactionValues.flat()
+            if (data.refTransactions && updatedUser.referrer) {
+                const refTransactionRepository = dataSource.getRepository(RefTransactionEntity);
+                const refTransactions = data.refTransactions.map((transaction: any) => 
+                    refTransactionRepository.create({
+                        from: updatedUser,
+                        to: updatedUser.referrer,
+                        hash: transaction.hash,
+                        description: transaction.description,
+                        status: TransactionStatus.SUCCESS
+                    })
                 );
+                await refTransactionRepository.save(refTransactions);
             }
     
             res.json({ data: updatedUser });
@@ -276,20 +278,22 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.status(400).json({ message: 'Invalid address' });
             }
 
-            const pool = getPool();
-            const result = await pool.query(
-                'UPDATE users SET need_update = true, updated_deposit_amount = NULL WHERE address = $1 RETURNING *',
-                [getAddress(address)]
+            const userRepository = dataSource.getRepository(UserEntity);
+            const result = await userRepository.update(
+                { address: getAddress(address) },
+                { need_update: true, updated_deposit_amount: null }
             );
 
-            if (result.rows.length === 0) {
+            if (result.affected === 0) {
                 return res.status(404).json({ message: 'User not found' });
             }
+
+            const updatedUser = await userRepository.findOne({ where: { address: getAddress(address) } });
 
             // Invalidate relevant caches
             await redisClient.del(`user:${address}`);
 
-            res.json({ data: result.rows[0] });
+            res.json({ data: updatedUser });
         } catch (error) {
             console.error('Error in setUserNeedUpdate:', error);
             res.status(500).json({ message: 'Internal server error' });
@@ -309,19 +313,23 @@ export const userController = (redisClient: RedisClientType) => ({
                 return res.json({ data: parseFloat(cachedSnapshot) });
             }
 
-            const pool = getPool();
-            const user = await pool.query('SELECT id FROM users WHERE address = $1', [getAddress(address)]);
-            if (user.rows.length === 0) {
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ where: { address: getAddress(address) } });
+            if (!user) {
                 return res.json({ data: 0 });
             }
 
+            const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
             const timestamp = moment().subtract(1, 'years').toDate();
-            const record = await pool.query(
-                'SELECT value FROM value_records WHERE user_id = $1 AND created_at >= $2 ORDER BY created_at ASC LIMIT 1',
-                [user.rows[0].id, timestamp]
-            );
+            const record = await valueRecordRepository.findOne({
+                where: { 
+                    user: { address: user.address }, 
+                    created_at: MoreThanOrEqual(timestamp) 
+                },
+                order: { created_at: 'ASC' }
+            });
 
-            const snapshotValue = record.rows.length > 0 ? parseFloat(record.rows[0].value) : 0;
+            const snapshotValue = record ? parseFloat(record.value) : 0;
             await redisClient.set(cacheKey, snapshotValue.toString(), { EX: 3600 }); // Cache for 1 hour
             res.json({ data: snapshotValue });
         } catch (error) {
@@ -336,44 +344,43 @@ export const userController = (redisClient: RedisClientType) => ({
             if (!address || !isAddress(address)) {
                 return res.status(400).json({ message: 'Invalid address' });
             }
-
+    
             const cacheKey = `ytd:${address}`;
             const cachedYTD = await redisClient.get(cacheKey);
             if (cachedYTD) {
                 return res.json({ data: parseFloat(cachedYTD) });
             }
-
-            const pool = getPool();
-            const user = await pool.query('SELECT id FROM users WHERE address = $1', [getAddress(address)]);
-            if (user.rows.length === 0) {
+    
+            const userRepository = dataSource.getRepository(UserEntity);
+            const user = await userRepository.findOne({ where: { address: getAddress(address) } });
+            if (!user) {
                 return res.json({ data: 0 });
             }
-
+    
             const WETH = getWETH();
             const WBTC = getWBTC();
-
-            const records = await pool.query(
-                `SELECT * FROM token_records 
-             WHERE user_id = $1 
-             ORDER BY block_number ASC, log_index ASC`,
-                [user.rows[0].id]
-            );
-
-            if (records.rows.length === 0) {
+    
+            const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
+            const records = await tokenRecordRepository.find({
+                where: { user: { address: user.address } },
+                order: { block_number: 'ASC', log_index: 'ASC' }
+            });
+    
+            if (records.length === 0) {
                 return res.json({ data: 0 });
             }
-
+    
             const prices = await getTokenPricing();
             const values: { [key: string]: number } = {};
             const valuesUSD: { [key: string]: number } = {};
             const averages: { [key: string]: number } = {};
-
-            for (const record of records.rows) {
+    
+            for (const record of records) {
                 if (!values[record.token]) {
                     values[record.token] = 0;
                     valuesUSD[record.token] = 0;
                 }
-
+    
                 if (record.type === TokenRecordType.DEPOSIT) {
                     values[record.token] += parseFloat(record.value);
                     valuesUSD[record.token] += parseFloat(record.value) * parseFloat(record.token_price);
@@ -382,7 +389,7 @@ export const userController = (redisClient: RedisClientType) => ({
                     valuesUSD[record.token] -= parseFloat(record.value) * parseFloat(record.token_price);
                 }
             }
-
+    
             for (const token of [WETH, WBTC]) {
                 if (values[token.address]) {
                     averages[token.address] = valuesUSD[token.address] / values[token.address];
@@ -390,11 +397,11 @@ export const userController = (redisClient: RedisClientType) => ({
                     averages[token.address] = prices[token.symbol].toNumber();
                 }
             }
-
+    
             const ytd =
                 (prices[WETH.symbol].toNumber() - averages[WETH.address]) * values[WETH.address] +
                 (prices[WBTC.symbol].toNumber() - averages[WBTC.address]) * values[WBTC.address];
-
+    
             await redisClient.set(cacheKey, ytd.toString(), { EX: 3600 }); // Cache for 1 hour
             res.json({ data: ytd });
         } catch (error) {

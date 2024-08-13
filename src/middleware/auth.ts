@@ -1,10 +1,11 @@
 import { NextFunction, Request, Response } from 'express-serve-static-core';
 import jwt from 'jsonwebtoken';
-import { ethers } from 'ethers';
-import { getAddress, isAddress } from 'ethers';
+import { utils, ethers } from 'ethers';
 import { UserEntity } from '../utils/entities/user.entity';
 import httpStatus from '../utils/types/httpStatus';
 import rateLimit from 'express-rate-limit';
+
+const { isAddress, getAddress } = utils;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const JWT_EXPIRATION = '1d';
@@ -65,7 +66,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     try {
-        const recoveredAddress = ethers.verifyMessage(user.nonce.toString(), signature);
+        const recoveredAddress = utils.verifyMessage(user.nonce.toString(), signature);
         if (getAddress(address) !== getAddress(recoveredAddress)) {
             return res.status(httpStatus.Unauthorized).json({ error: 'Invalid signature' });
         }
