@@ -21,8 +21,3 @@ export const loggerMiddleware = (req: Request, res: Response, next: NextFunction
     
     next();
 };
-
-export const errorHandlerMiddleware = (err: Error, req: Request, res: Response, next: NextFunction) => {
-    logError(err, req);
-    res.status(500).json({ error: 'Internal Server Error', transactionId: (req as any).transactionId });
-};

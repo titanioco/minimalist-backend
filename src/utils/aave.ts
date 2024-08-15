@@ -112,18 +112,18 @@ export interface Action {
 export const getHFAfterActions = (accountData: UserAccountData, actions: Action[]) => {
   const { totalCollateralBase, totalDebtBase, currentLiquidationThreshold } = accountData;
   let totalCollateral = totalCollateralBase
-    .times(currentLiquidationThreshold)
-    .div(10000)
-    .div(TEN_POW(8));
-  let totalDebt = BigNumberJS(totalDebtBase).div(TEN_POW(8));
+    .multipliedBy(currentLiquidationThreshold)
+    .dividedBy(10000)
+    .dividedBy(TEN_POW(8));
+  let totalDebt = BigNumberJS(totalDebtBase).dividedBy(TEN_POW(8));
   for (const { token, amount, tokenPrice, type } of actions) {
     if (type === ActionType.DEPOSIT) {
       totalCollateral = totalCollateral.plus(
-        amount.multipliedBy(tokenPrice).multipliedBy(token.LT).div(TEN_POW(token.decimals)),
+        amount.multipliedBy(tokenPrice).multipliedBy(token.LT).dividedBy(TEN_POW(token.decimals)),
       );
     } else {
-      totalDebt = totalDebt.plus(amount.multipliedBy(tokenPrice).div(TEN_POW(token.decimals)));
+      totalDebt = totalDebt.plus(amount.multipliedBy(tokenPrice).dividedBy(TEN_POW(token.decimals)));
     }
   }
-  return totalCollateral.div(totalDebt);
+  return totalCollateral.dividedBy(totalDebt);
 };
