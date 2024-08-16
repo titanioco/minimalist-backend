@@ -1,77 +1,63 @@
-import { Request, Response } from 'express-serve-static-core';
-import { RedisClientType } from 'redis';
-import { DataSource, MoreThanOrEqual } from 'typeorm';
-import { utils, ethers } from 'ethers';
-import _ from 'lodash';
-import moment from 'moment';
-import { getLedger } from '../utils/abis';
-import { getLedgerAddress } from '../constants/contracts';
-import { provider } from '../utils/provider';
-import { TransactionStatus, TokenRecordType } from '../utils/types/types';
-import { getTokenPricing } from '../utils/aave';
-import { getWBTC, getWETH } from '../constants/tokens';
-import HttpStatus from '../utils/types/httpStatus';
-import { UserEntity } from '../utils/entities/user.entity';
-import { TransactionEntity } from '../utils/entities/transaction.entity';
-import { RefTransactionEntity } from '../utils/entities/refTransaction.entity';
-import { ValueRecordEntity } from '../utils/entities/valueRecord.entity';
-import { TokenRecordEntity } from '../utils/entities/tokenRecord.entity';
+import { Request, Response } from "express-serve-static-core";
+import { DataSource, MoreThanOrEqual } from "typeorm";
+import { utils, ethers } from "ethers";
+import _ from "lodash";
+import moment from "moment";
+import { getLedger } from "../utils/abis";
+import { getLedgerAddress } from "../constants/contracts";
+import { provider } from "../utils/provider";
+import { TransactionStatus, TokenRecordType } from "../utils/types/types";
+import { getTokenPricing } from "../utils/aave";
+import { getWBTC, getWETH } from "../constants/tokens";
+import HttpStatus from "../utils/types/httpStatus";
+import { UserEntity } from "../utils/entities/user.entity";
+import { TransactionEntity } from "../utils/entities/transaction.entity";
+import { RefTransactionEntity } from "../utils/entities/refTransaction.entity";
+import { ValueRecordEntity } from "../utils/entities/valueRecord.entity";
+import { TokenRecordEntity } from "../utils/entities/tokenRecord.entity";
 
 const { isAddress, getAddress } = utils;
 
-export const userController = (redisClient: RedisClientType, dataSource: DataSource) => ({
+export const userController = (dataSource: DataSource) => ({
     getNonce: async (req: Request, res: Response) => {
         try {
             const { address } = req.params;
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
-
+    
             const userRepository = dataSource.getRepository(UserEntity);
             const user = await userRepository.findOne({ where: { address: getAddress(address) } });
-
+    
             if (!user) {
-                return res.json({ data: '0' });
+                return res.send({ data: "0" });
             }
-
             const newNonce = user.nonce + 1;
             await userRepository.update({ address: getAddress(address) }, { nonce: newNonce });
-
-            res.json({ data: newNonce.toString() });
+            return res.send({ data: newNonce.toString() });
         } catch (error) {
-            console.error('Error in getNonce:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getNonce:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
     getUser: async (req: Request, res: Response) => {
         try {
-            const { address } = req.params;
-            if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+            const { address: userAddress } = req.params;
+            if (!userAddress || !isAddress(userAddress)) {
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
-
-            const cacheKey = `user:${address}`;
-            const cachedUser = await redisClient.get(cacheKey);
-            if (cachedUser) {
-                return res.json({ data: JSON.parse(cachedUser) });
-            }
-
+    
+            const normalizedAddress = getAddress(userAddress);
             const userRepository = dataSource.getRepository(UserEntity);
-            const user = await userRepository.findOne({ 
-                where: { address: getAddress(address) },
-                relations: ['referrer']
+            const user = await userRepository.findOne({
+                where: { address: normalizedAddress },
+                relations: ["referrer"],
             });
-
-            if (!user) {
-                return res.status(404).json({ message: 'User not found' });
-            }
-
-            await redisClient.set(cacheKey, JSON.stringify(user), { EX: 3600 });
-            res.json({ data: user });
+            return res.send({ data: user });
         } catch (error) {
-            console.error('Error in getUser:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getUser:", error);
+            return res.status(HttpStatus.InternalServerError).send({ message: "An unexpected error occurred" });
         }
     },
 
@@ -79,49 +65,34 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
         try {
             const { code } = req.params;
             if (!code) {
-                return res.status(400).json({ message: 'Invalid code' });
-            }
-
-            const cacheKey = `user:code:${code}`;
-            const cachedUser = await redisClient.get(cacheKey);
-            if (cachedUser) {
-                return res.json({ data: JSON.parse(cachedUser) });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
 
             const userRepository = dataSource.getRepository(UserEntity);
-            const user = await userRepository.findOne({ 
+            const user = await userRepository.findOne({
                 where: { code },
-                relations: ['referrer']
+                relations: ["referrer"],
             });
 
             if (!user) {
-                return res.status(404).json({ message: 'User not found' });
+                return res.status(HttpStatus.NotFound).send({ message: "User not found" });
             }
 
-            await redisClient.set(cacheKey, JSON.stringify(user), { EX: 3600 });
-            res.json({ data: user });
+            return res.send({ data: user });
         } catch (error) {
-            console.error('Error in getUserByCode:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getUserByCode:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
     getUsers: async (_: Request, res: Response) => {
         try {
-            const cacheKey = 'all:users';
-            const cachedUsers = await redisClient.get(cacheKey);
-            if (cachedUsers) {
-                return res.json({ data: JSON.parse(cachedUsers) });
-            }
-
             const userRepository = dataSource.getRepository(UserEntity);
             const users = await userRepository.find();
-
-            await redisClient.set(cacheKey, JSON.stringify(users), { EX: 300 }); // Cache for 5 minutes
-            res.json({ data: users });
+            return res.send({ data: users });
         } catch (error) {
-            console.error('Error in getUsers:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getUsers:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -129,13 +100,7 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
         try {
             const { address } = req.params;
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
-            }
-
-            const cacheKey = `children:${address}`;
-            const cachedChildren = await redisClient.get(cacheKey);
-            if (cachedChildren) {
-                return res.json({ data: JSON.parse(cachedChildren) });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
 
             const userRepository = dataSource.getRepository(UserEntity);
@@ -143,11 +108,10 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
                 where: { referrer: { address: getAddress(address) } },
             });
 
-            await redisClient.set(cacheKey, JSON.stringify(children), { EX: 300 }); // Cache for 5 minutes
-            res.json({ data: children });
+            return res.send({ data: children });
         } catch (error) {
-            console.error('Error in getChildren:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getChildren:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -157,19 +121,21 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
             const { code } = req.body;
 
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
 
             const userRepository = dataSource.getRepository(UserEntity);
-            const existingUser = await userRepository.findOne({ where: { address: getAddress(address) } });
+            const existingUser = await userRepository.findOne({
+                where: { address: getAddress(address) },
+            });
             if (existingUser) {
-                return res.status(400).json({ message: 'User already exists' });
+                return res.status(HttpStatus.BadRequest).send({ message: "User already exists" });
             }
 
             const ledgerContract = getLedger(getLedgerAddress(), provider);
             const walletAddress = await ledgerContract.getWallet(getAddress(address));
             if (walletAddress === ethers.constants.AddressZero) {
-                return res.status(400).json({ message: 'Something went wrong' });
+                return res.status(HttpStatus.BadRequest).send({ message: "Something wrong" });
             }
 
             const userAddress = getAddress(address);
@@ -185,19 +151,15 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
                 code: userCode,
                 wallet_address: walletAddress,
                 recipient: userAddress,
-                referrer: referrer
+                referrer: referrer,
             });
 
             await userRepository.save(newUser);
 
-            // Invalidate relevant caches
-            await redisClient.del(`user:${userAddress}`);
-            await redisClient.del('all:users');
-
-            res.status(201).json({ data: newUser });
+            return res.status(HttpStatus.Created).send({ data: newUser });
         } catch (error) {
-            console.error('Error in register:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in register:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -206,16 +168,18 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
             const { address: userAddress } = req.params;
             const data = req.body;
             if (!userAddress || !isAddress(userAddress)) {
-                return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
-    
+
             const userRepository = dataSource.getRepository(UserEntity);
-            const user = await userRepository.findOne({ where: { address: getAddress(userAddress) } });
-            
+            const user = await userRepository.findOne({
+                where: { address: getAddress(userAddress) },
+            });
+
             if (!user) {
-                return res.status(HttpStatus.BadRequest).json({ message: "User not found" });
+                return res.status(HttpStatus.NotFound).send({ message: "User not found" });
             }
-    
+
             const updateFields = [
                 "safe_hf",
                 "risk_hf",
@@ -228,46 +192,46 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
                 "last_deposited_at",
                 "last_swapped_at",
             ];
-    
-            updateFields.forEach(field => {
+
+            updateFields.forEach((field) => {
                 if (data[field] !== undefined) {
                     user[field] = data[field];
                 }
             });
-    
+
             const updatedUser = await userRepository.save(user);
-    
+
             if (data.transactions) {
                 const transactionRepository = dataSource.getRepository(TransactionEntity);
-                const transactions = data.transactions.map((transaction: any) => 
+                const transactions = data.transactions.map((transaction: any) =>
                     transactionRepository.create({
                         user: updatedUser,
                         hash: transaction.hash,
                         descriptions: transaction.descriptions,
-                        status: TransactionStatus.SUCCESS
-                    })
+                        status: TransactionStatus.SUCCESS,
+                    }),
                 );
                 await transactionRepository.save(transactions);
             }
-    
+
             if (data.refTransactions && updatedUser.referrer) {
                 const refTransactionRepository = dataSource.getRepository(RefTransactionEntity);
-                const refTransactions = data.refTransactions.map((transaction: any) => 
+                const refTransactions = data.refTransactions.map((transaction: any) =>
                     refTransactionRepository.create({
                         from: updatedUser,
                         to: updatedUser.referrer,
                         hash: transaction.hash,
                         description: transaction.description,
-                        status: TransactionStatus.SUCCESS
-                    })
+                        status: TransactionStatus.SUCCESS,
+                    }),
                 );
                 await refTransactionRepository.save(refTransactions);
             }
-    
-            res.json({ data: updatedUser });
+
+            return res.send({ data: updatedUser });
         } catch (error) {
-            console.error('Error in updateUser:', error);
-            res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+            console.error("Error in updateUser:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -275,28 +239,27 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
         try {
             const { address } = req.params;
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
 
             const userRepository = dataSource.getRepository(UserEntity);
             const result = await userRepository.update(
                 { address: getAddress(address) },
-                { need_update: true, updated_deposit_amount: null }
+                { need_update: true, updated_deposit_amount: null },
             );
 
             if (result.affected === 0) {
-                return res.status(404).json({ message: 'User not found' });
+                return res.status(HttpStatus.NotFound).send({ message: "User not found" });
             }
 
-            const updatedUser = await userRepository.findOne({ where: { address: getAddress(address) } });
+            const updatedUser = await userRepository.findOne({
+                where: { address: getAddress(address) },
+            });
 
-            // Invalidate relevant caches
-            await redisClient.del(`user:${address}`);
-
-            res.json({ data: updatedUser });
+            return res.send({ data: updatedUser });
         } catch (error) {
-            console.error('Error in setUserNeedUpdate:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in setUserNeedUpdate:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -304,37 +267,31 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
         try {
             const { address } = req.params;
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
-            }
-
-            const cacheKey = `snapshot:${address}`;
-            const cachedSnapshot = await redisClient.get(cacheKey);
-            if (cachedSnapshot) {
-                return res.json({ data: parseFloat(cachedSnapshot) });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
 
             const userRepository = dataSource.getRepository(UserEntity);
             const user = await userRepository.findOne({ where: { address: getAddress(address) } });
             if (!user) {
-                return res.json({ data: 0 });
+                return res.send({ data: 0 });
             }
 
             const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
-            const timestamp = moment().subtract(1, 'years').toDate();
+            const timestamp = moment().subtract(1, "years").toDate();
             const record = await valueRecordRepository.findOne({
-                where: { 
-                    user: { address: user.address }, 
-                    created_at: MoreThanOrEqual(timestamp) 
+                where: {
+                    user: { address: user.address },
+                    created_at: MoreThanOrEqual(timestamp),
                 },
-                order: { created_at: 'ASC' }
+                order: { created_at: "ASC" },
             });
 
             const snapshotValue = record ? parseFloat(record.value) : 0;
-            await redisClient.set(cacheKey, snapshotValue.toString(), { EX: 3600 }); // Cache for 1 hour
-            res.json({ data: snapshotValue });
+            
+            return res.send({ data: snapshotValue });
         } catch (error) {
-            console.error('Error in getSnapshot:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getSnapshot:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
 
@@ -342,45 +299,39 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
         try {
             const { address } = req.params;
             if (!address || !isAddress(address)) {
-                return res.status(400).json({ message: 'Invalid address' });
+                return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
             }
-    
-            const cacheKey = `ytd:${address}`;
-            const cachedYTD = await redisClient.get(cacheKey);
-            if (cachedYTD) {
-                return res.json({ data: parseFloat(cachedYTD) });
-            }
-    
+
             const userRepository = dataSource.getRepository(UserEntity);
             const user = await userRepository.findOne({ where: { address: getAddress(address) } });
             if (!user) {
-                return res.json({ data: 0 });
+                return res.send({ data: 0 });
             }
-    
+
             const WETH = getWETH();
             const WBTC = getWBTC();
-    
+
             const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
             const records = await tokenRecordRepository.find({
                 where: { user: { address: user.address } },
-                order: { block_number: 'ASC', log_index: 'ASC' }
+                order: { block_number: "ASC", log_index: "ASC" },
             });
-    
+
             if (records.length === 0) {
-                return res.json({ data: 0 });
+                return res.send({ data: 0 });
             }
-    
+
             const prices = await getTokenPricing();
             const values: { [key: string]: number } = {};
             const valuesUSD: { [key: string]: number } = {};
             const averages: { [key: string]: number } = {};
-    
+
             for (const record of records) {
                 if (!values[record.token]) {
                     values[record.token] = 0;
                     valuesUSD[record.token] = 0;
                 }
-    
+
                 if (record.type === TokenRecordType.DEPOSIT) {
                     values[record.token] += parseFloat(record.value);
                     valuesUSD[record.token] += parseFloat(record.value) * parseFloat(record.token_price);
@@ -389,7 +340,7 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
                     valuesUSD[record.token] -= parseFloat(record.value) * parseFloat(record.token_price);
                 }
             }
-    
+
             for (const token of [WETH, WBTC]) {
                 if (values[token.address]) {
                     averages[token.address] = valuesUSD[token.address] / values[token.address];
@@ -397,18 +348,17 @@ export const userController = (redisClient: RedisClientType, dataSource: DataSou
                     averages[token.address] = prices[token.symbol].toNumber();
                 }
             }
-    
+
             const ytd =
                 (prices[WETH.symbol].toNumber() - averages[WETH.address]) * values[WETH.address] +
                 (prices[WBTC.symbol].toNumber() - averages[WBTC.address]) * values[WBTC.address];
-    
-            await redisClient.set(cacheKey, ytd.toString(), { EX: 3600 }); // Cache for 1 hour
-            res.json({ data: ytd });
+
+            return res.send({ data: ytd });
         } catch (error) {
-            console.error('Error in getYTD:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            console.error("Error in getYTD:", error);
+            return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
         }
     },
-
-    // You can add more methods here as needed
 });
+
+export default userController;

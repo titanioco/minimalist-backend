@@ -10,7 +10,7 @@ import { RefTransactionEntity } from '../utils/entities/refTransaction.entity';
 
 const { isAddress, getAddress } = utils;
 
-export const transactionController = (redisClient: RedisClientType, dataSource: DataSource) => ({
+export const transactionController = (dataSource: DataSource) => ({
   getTransactions: async (req: Request, res: Response) => {
     try {
       const { address: userAddress } = req.params;
@@ -18,20 +18,14 @@ export const transactionController = (redisClient: RedisClientType, dataSource: 
       const size = Number(req.query.size) || 10;
 
       if (!userAddress || !isAddress(userAddress)) {
-        return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
-      }
-
-      const cacheKey = `transactions:${userAddress}:${page}:${size}`;
-      const cachedTransactions = await redisClient.get(cacheKey);
-      if (cachedTransactions) {
-        return res.json(JSON.parse(cachedTransactions));
+        return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
       }
 
       const userRepository = dataSource.getRepository(UserEntity);
       const user = await userRepository.findOne({ where: { address: getAddress(userAddress) } });
       
       if (!user) {
-        return res.json({ data: [], total: 0 });
+        return res.send({ data: [], total: 0 });
       }
 
       const transactionRepository = dataSource.getRepository(TransactionEntity);
@@ -42,16 +36,10 @@ export const transactionController = (redisClient: RedisClientType, dataSource: 
         skip: page * size
       });
 
-      const result = {
-        data: transactions,
-        total: total
-      };
-
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 300 }); // Cache for 5 minutes
-      res.json(result);
+      return res.send({ data: transactions, total });
     } catch (error) {
       console.error('Error in getTransactions:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
@@ -60,20 +48,14 @@ export const transactionController = (redisClient: RedisClientType, dataSource: 
       const { address: userAddress } = req.params;
       
       if (!userAddress || !isAddress(userAddress)) {
-        return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
-      }
-
-      const cacheKey = `ref-transactions:${userAddress}`;
-      const cachedRefTransactions = await redisClient.get(cacheKey);
-      if (cachedRefTransactions) {
-        return res.json({ data: JSON.parse(cachedRefTransactions) });
+        return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
       }
 
       const userRepository = dataSource.getRepository(UserEntity);
       const user = await userRepository.findOne({ where: { address: getAddress(userAddress) } });
       
       if (!user) {
-        return res.json({ data: [] });
+        return res.send({ data: [] });
       }
 
       const refTransactionRepository = dataSource.getRepository(RefTransactionEntity);
@@ -89,11 +71,10 @@ export const transactionController = (redisClient: RedisClientType, dataSource: 
         to_address: rt.to.address
       }));
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 300 }); // Cache for 5 minutes
-      res.json({ data: result });
+      return res.send({ data: result });
     } catch (error) {
       console.error('Error in getRefTransactions:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
@@ -102,27 +83,20 @@ export const transactionController = (redisClient: RedisClientType, dataSource: 
       const { hash } = req.params;
       
       if (!hash) {
-        return res.status(HttpStatus.BadRequest).json({ message: "Invalid parameters" });
-      }
-
-      const cacheKey = `transaction:${hash}`;
-      const cachedTransaction = await redisClient.get(cacheKey);
-      if (cachedTransaction) {
-        return res.json({ data: JSON.parse(cachedTransaction) });
+        return res.status(HttpStatus.BadRequest).send({ message: "Invalid parameters" });
       }
 
       const transactionRepository = dataSource.getRepository(TransactionEntity);
       const transaction = await transactionRepository.findOne({ where: { hash } });
 
       if (!transaction) {
-        return res.status(HttpStatus.NotFound).json({ message: "Transaction not found" });
+        return res.status(HttpStatus.NotFound).send({ message: "Transaction not found" });
       }
 
-      await redisClient.set(cacheKey, JSON.stringify(transaction), { EX: 3600 }); // Cache for 1 hour
-      res.json({ data: transaction });
+      return res.send({ data: transaction });
     } catch (error) {
       console.error('Error in getTransaction:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      return res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 

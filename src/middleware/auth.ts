@@ -1,83 +1,52 @@
-import { NextFunction, Request, Response } from 'express-serve-static-core';
-import jwt from 'jsonwebtoken';
-import { utils, ethers } from 'ethers';
-import { UserEntity } from '../utils/entities/user.entity';
-import httpStatus from '../utils/types/httpStatus';
-import rateLimit from 'express-rate-limit';
-
-const { isAddress, getAddress } = utils;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_EXPIRATION = '1d';
-
-export const generateToken = (userAddress: string): string => {
-    return jwt.sign({ address: userAddress }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
-};
-
-export const verifyToken = (token: string): string | object => {
-    return jwt.verify(token, JWT_SECRET);
-};
-
-// Rate limiting middleware
-export const authRateLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
-});
+import { ethers } from "ethers";
+import { getAddress, isAddress } from "ethers/lib/utils";
+import { UserEntity } from "../utils/entities/user.entity";
+import { getConnection } from "../utils/postgresql";
+import { NextFunction, Request, Response } from "express-serve-static-core";
+import httpStatus from "../utils/types/httpStatus";
 
 const auth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
-        if (!token) {
-            return res.status(httpStatus.Unauthorized).json({ error: 'No token provided' });
+        await getConnection();
+        const body = req.body || {};
+        let userAddress: string = body?.address as string;
+        const signature: string = body?.signature as string;
+        if (!userAddress) {
+            userAddress = req.params.address as string;
         }
-
-        const decoded = verifyToken(token) as { address: string };
-        const user = await UserEntity.createQueryBuilder("user")
-            .where("user.address = :address", { address: getAddress(decoded.address) })
-            .getOne();
-
+        if (!userAddress || !isAddress(userAddress) || !signature) {
+            return res.status(httpStatus.BadRequest).json({
+                error: "Missing parameters",
+            });
+        }
+        const user = await UserEntity.findOne({
+            where: { address: getAddress(userAddress) }
+        });
         if (!user) {
-            return res.status(httpStatus.Unauthorized).json({ error: 'User not found' });
+            return res.status(httpStatus.Unauthorized).json({
+                error: "User not found",
+            });
         }
-
-        req.user = user;
-        next();
-    } catch (error) {
-        if (error instanceof jwt.JsonWebTokenError) {
-            return res.status(httpStatus.Unauthorized).json({ error: 'Invalid token' });
+        const decodedAddress = ethers.utils.verifyMessage(String(user.nonce), signature);
+        if (getAddress(userAddress) !== decodedAddress) {
+            return res.status(httpStatus.Unauthorized).json({
+                error: "Unauthorized",
+            });
         }
-        return res.status(httpStatus.InternalServerError).json({ error: 'An error occurred during authentication' });
-    }
-};
-
-export const login = async (req: Request, res: Response) => {
-    const { address, signature } = req.body;
-
-    if (!address || !isAddress(address) || !signature) {
-        return res.status(httpStatus.BadRequest).json({ error: 'Missing or invalid parameters' });
-    }
-
-    const user = await UserEntity.createQueryBuilder("user")
-        .where("user.address = :address", { address: getAddress(address) })
-        .getOne();
-
-    if (!user) {
-        return res.status(httpStatus.Unauthorized).json({ error: 'User not found' });
-    }
-
-    try {
-        const recoveredAddress = utils.verifyMessage(user.nonce.toString(), signature);
-        if (getAddress(address) !== getAddress(recoveredAddress)) {
-            return res.status(httpStatus.Unauthorized).json({ error: 'Invalid signature' });
-        }
-
-        user.nonce = Math.floor(Math.random() * 1000000);
+        // Update nonce
+        user.nonce++;
         await user.save();
 
-        const token = generateToken(address);
-        return res.json({ token });
+        // Attach the user to the request object
+        (req as any).user = user;
+
+        next();
     } catch (error) {
-        return res.status(httpStatus.InternalServerError).json({ error: 'An error occurred during login' });
+        if (error instanceof Error) {
+            return res.status(httpStatus.BadRequest).json({
+                error: error.message,
+            });
+        }
     }
 };
 

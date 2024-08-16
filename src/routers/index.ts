@@ -8,12 +8,12 @@ import { createStatisticRouter } from "./v1/statistic.route";
 import logger from '../utils/logger';
 import logRoutes from "../utils/logRoutes";
 
-export const routeApp = (app: Application, redisClient: RedisClientType, dataSource: DataSource) => {
+export const routeApp = (app: Application, dataSource: DataSource) => {
     // V1 routes
-    const mainRouter: Router = createMainRoute(redisClient, dataSource);
-    const userRouter: Router = createUserRoute(redisClient, dataSource);
-    const transactionsRouter: Router = createTransactionsRoute(redisClient, dataSource);
-    const statisticRouter: Router = createStatisticRouter(redisClient, dataSource);
+    const mainRouter: Router = createMainRoute(dataSource);
+    const userRouter: Router = createUserRoute(dataSource);
+    const transactionsRouter: Router = createTransactionsRoute(dataSource);
+    const statisticRouter: Router = createStatisticRouter(dataSource);
 
     app.use("/api/v1", mainRouter);
     app.use("/api/v1/user", userRouter);

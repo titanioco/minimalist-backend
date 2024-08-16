@@ -5,14 +5,14 @@ import { DataSource } from 'typeorm';
 import { transactionController } from "../../controllers/transaction.controller";
 import { asyncErrorHandler } from '../../middleware/errorHandler';
 
-const createTransactionsRoute = (redisClient: RedisClientType, dataSource: DataSource): Router => {
+const createTransactionsRoute = (dataSource: DataSource): Router => {
     const router = express.Router() as Router;
 
     const {
         getTransactions,
         getTransaction,
         getRefTransactions
-    } = transactionController(redisClient, dataSource);
+    } = transactionController(dataSource);
 
     router.get("/:address", asyncErrorHandler(getTransactions));
     router.get("/txn/:hash", asyncErrorHandler(getTransaction));

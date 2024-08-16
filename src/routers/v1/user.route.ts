@@ -5,9 +5,9 @@ import { DataSource } from 'typeorm';
 import { userController } from "../../controllers/user.controller";
 import { asyncErrorHandler } from '../../middleware/errorHandler';
 
-export const createUserRoute = (redisClient: RedisClientType, dataSource: DataSource): Router => {
+export const createUserRoute = (dataSource: DataSource): Router => {
     const router: Router = express.Router();
-    const { getUser, getUserByCode, getChildren, getYTD, register, setUserNeedUpdate, updateUser } = userController(redisClient, dataSource);
+    const { getUser, getUserByCode, getChildren, getYTD, register, setUserNeedUpdate, updateUser } = userController(dataSource);
 
     router.get("/code/:code", asyncErrorHandler(getUserByCode));
     router.get("/children/:address", asyncErrorHandler(getChildren));

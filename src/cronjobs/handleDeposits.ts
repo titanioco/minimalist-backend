@@ -39,7 +39,7 @@ const checkAndApprove = async (
     if (allowance.sub(ethers.constants.MaxUint256.div(100)).gt(0)) {
 		return [];
 	}
-    const tx = await tokenContract.approve.populateTransaction(
+    const tx = await tokenContract.populateTransaction.approve(
         spender,
         constants.MaxUint256
     );
@@ -99,7 +99,7 @@ const depositUSDC = async (
     // Set E-Mode
     const mode = await iPoolContract.getUserEMode(user.wallet_address);
     if (mode.toString() !== "1") {
-        const tx0 = await iPoolContract.setUserEMode.populateTransaction("1");
+        const tx0 = await iPoolContract.populateTransaction.setUserEMode("1");
         txs.push(tx0);
     }
 
@@ -107,7 +107,7 @@ const depositUSDC = async (
     txs.push(...(await checkAndApprove(USDC.address, user.wallet_address, getIPoolAddress())));
     
     // Transfer USDC to wallet contract
-    const tx1 = await usdcContract.transferFrom.populateTransaction(
+    const tx1 = await usdcContract.populateTransaction.transferFrom(
         user.address,
         user.wallet_address,
         amount.toFixed(0)
@@ -115,7 +115,7 @@ const depositUSDC = async (
     txs.push(tx1);
     
     // Supply USDC
-    const tx2 = await iPoolContract.supply.populateTransaction(
+    const tx2 = await iPoolContract.populateTransaction.supply(
         USDC.address,
         amount.toFixed(0),
         user.wallet_address,
@@ -124,7 +124,7 @@ const depositUSDC = async (
     txs.push(tx2);
     
     // Borrow USDC
-    const tx3 = await iPoolContract.borrow.populateTransaction(
+    const tx3 = await iPoolContract.populateTransaction.borrow(
         USDC.address,
         borrowAmount.toFixed(0),
         2,
@@ -134,14 +134,14 @@ const depositUSDC = async (
     txs.push(tx3);
     
     // Transfer borrowed USDC to wallet contract
-    const tx4 = await usdcContract.transfer.populateTransaction(
+    const tx4 = await usdcContract.populateTransaction.transfer(
         user.recipient,
         borrowAmount.toFixed(0)
     );
     txs.push(tx4);
     
     // Withdraw aUSDC -> USDC for fees
-    const tx5 = await iPoolContract.withdraw.populateTransaction(
+    const tx5 = await iPoolContract.populateTransaction.withdraw(
         USDC.address,
         appFee.plus(txFee).multipliedBy(100.5).div(100).toFixed(0),
         user.wallet_address
@@ -153,7 +153,7 @@ const depositUSDC = async (
         appFee = appFee.minus(refFee);
 
         // Transfer ref fees to referrer
-        const txFee = await usdcContract.transfer.populateTransaction(
+        const txFee = await usdcContract.populateTransaction.transfer(
             refAddress,
             refFee.toFixed(0)
         );
@@ -161,7 +161,7 @@ const depositUSDC = async (
     }
 
     // Transfer fees to appfee receiver
-    const tx6 = await usdcContract.transfer.populateTransaction(
+    const tx6 = await usdcContract.populateTransaction.transfer(
         APP_FEE_RECEIVER,
         appFee.toFixed(0)
     );
@@ -276,7 +276,7 @@ const handleDeposit = async (
         });
         transaction = await transactionRepository.save(transaction);
 
-        const estimatedGas = await walletContract.execute.estimateGas(
+        const estimatedGas = await walletContract.estimateGas.execute(
             to,
             data,
             value,

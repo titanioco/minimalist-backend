@@ -10,19 +10,13 @@ import { ValueRecordEntity } from '../utils/entities/valueRecord.entity';
 import { TransactionEntity } from '../utils/entities/transaction.entity';
 import { TokenRecordEntity } from '../utils/entities/tokenRecord.entity';
 
-export const statisticController = (redisClient: RedisClientType, dataSource: DataSource) => ({
+export const statisticController = (dataSource: DataSource) => ({
   getWalletsLinked: async (req: Request, res: Response) => {
     try {
       const query = req.query || {};
       const page = Number(query.page) || 1;
       const take = Number(query.take) || 10;
       const skip = (page - 1) * take;
-
-      const cacheKey = `wallets_linked:${page}:${take}`;
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
 
       const userRepository = dataSource.getRepository(UserEntity);
       const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
@@ -51,24 +45,16 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 300 }); // Cache for 5 minutes
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getWalletsLinked:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getWalletsDepositedMorethan4Times: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'wallets_deposited_more_than_4_times';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const userRepository = dataSource.getRepository(UserEntity);
-      const transactionRepository = dataSource.getRepository(TransactionEntity);
       const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
 
       const depositedUsers = await userRepository.createQueryBuilder('user')
@@ -98,22 +84,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getWalletsDepositedMorethan4Times:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getTotalBTCAndETHSwapped: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'total_btc_eth_swapped';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const transactionRepository = dataSource.getRepository(TransactionEntity);
       const swappedTransactions = await transactionRepository.find({
         where: {
@@ -128,22 +107,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getTotalBTCAndETHSwapped:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   walletsOpenedStatistic: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'wallets_opened_statistic';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const userRepository = dataSource.getRepository(UserEntity);
       const groupedUsers = await userRepository.createQueryBuilder('user')
         .select("DATE(user.created_at)", "date")
@@ -158,22 +130,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in walletsOpenedStatistic:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getTotalDepositFromStackInception: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'total_deposit_from_stack_inception';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
       const totalDeposit = await tokenRecordRepository.createQueryBuilder('token_record')
         .select('SUM(token_record.value)', 'total')
@@ -186,22 +151,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getTotalDepositFromStackInception:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getTotalWithdraw: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'total_withdraw';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
       const totalWithdraw = await tokenRecordRepository.createQueryBuilder('token_record')
         .select('SUM(token_record.value)', 'total')
@@ -214,22 +172,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getTotalWithdraw:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getTotalBTCAndETHDepositFromStackInception: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'total_btc_eth_deposit_from_stack_inception';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const tokenRecordRepository = dataSource.getRepository(TokenRecordEntity);
       const totalDeposit = await tokenRecordRepository.createQueryBuilder('token_record')
         .select('SUM(token_record.value * token_record.token_price)', 'total')
@@ -242,22 +193,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getTotalBTCAndETHDepositFromStackInception:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getCurrentStackValue: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'current_stack_value';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
       const totalStack = await valueRecordRepository.createQueryBuilder('value_record')
         .select('value_record.chain_id', 'chain_id')
@@ -277,22 +221,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 300 }); // Cache for 5 minutes
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getCurrentStackValue:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getNumberWalletsOutApp: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'number_wallets_out_app';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const valueRecordRepository = dataSource.getRepository(ValueRecordEntity);
       const walletsOutApp = await valueRecordRepository
         .createQueryBuilder('value_record')
@@ -307,22 +244,15 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getNumberWalletsOutApp:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 
   getNumberWalletsCreatedByAffiliate: async (_: Request, res: Response) => {
     try {
-      const cacheKey = 'number_wallets_created_by_affiliate';
-      const cachedResult = await redisClient.get(cacheKey);
-      if (cachedResult) {
-        return res.json(JSON.parse(cachedResult));
-      }
-
       const userRepository = dataSource.getRepository(UserEntity);
       const groupedUsers = await userRepository
         .createQueryBuilder('user')
@@ -339,11 +269,10 @@ export const statisticController = (redisClient: RedisClientType, dataSource: Da
         statusCode: HttpStatus.OK,
       };
 
-      await redisClient.set(cacheKey, JSON.stringify(result), { EX: 3600 }); // Cache for 1 hour
-      res.json(result);
+      res.send(result);
     } catch (error) {
       console.error('Error in getNumberWalletsCreatedByAffiliate:', error);
-      res.status(HttpStatus.BadRequest).json({ message: (error as Error).message });
+      res.status(HttpStatus.BadRequest).send({ message: (error as Error).message });
     }
   },
 

@@ -4,9 +4,9 @@ import { RedisClientType } from 'redis';
 import { DataSource } from 'typeorm';
 import { asyncErrorHandler } from '../../middleware/errorHandler';
 
-export const createStatisticRouter = (redisClient: RedisClientType, dataSource: DataSource) => {
+export const createStatisticRouter = (dataSource: DataSource) => {
   const router = express.Router();
-  const controller = statisticController(redisClient, dataSource);
+  const controller = statisticController(dataSource);
 
   router.get("/wallets-linked", asyncErrorHandler(controller.getWalletsLinked));
   router.get("/wallets-opened-statistic", asyncErrorHandler(controller.walletsOpenedStatistic));

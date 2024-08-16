@@ -68,7 +68,7 @@ async function startServer() {
         logger.info('Database connected successfully', generateTransactionId());
 
         // Routes
-        routeApp(app, redisClient, AppDataSource);
+        routeApp(app, AppDataSource);
         logger.info('Routes have been set up', generateTransactionId());
 
         // Error handling middleware - keep this as the last middleware

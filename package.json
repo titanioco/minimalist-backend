@@ -56,7 +56,7 @@
     "@types/reflect-metadata": "^0.1.0",
     "@types/uuid": "^10.0.0",
     "nodemon": "^2.0.19",
-    "ts-node": "^10.9.1",
+    "ts-node": "^10.9.2",
     "tslib": "^2.4.0",
     "typescript": "^5.5.4",
     "web3": "^1.7.1"

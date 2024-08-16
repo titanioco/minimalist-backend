@@ -4,9 +4,9 @@ import { RedisClientType } from 'redis';
 import { DataSource } from 'typeorm';
 import { asyncErrorHandler } from '../../middleware/errorHandler';
 
-export const createMainRoute = (redisClient: RedisClientType, dataSource: DataSource) => {
+export const createMainRoute = (dataSource: DataSource) => {
     const router = express.Router();
-    const { getNonce, getUsers } = userController(redisClient, dataSource);
+    const { getNonce, getUsers } = userController(dataSource);
 
     router.get("/nonce/:address", asyncErrorHandler(getNonce));
     router.get("/users", asyncErrorHandler(getUsers));

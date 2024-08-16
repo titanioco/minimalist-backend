@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers, BigNumber  } from "ethers";
 import BigNumberJS from "bignumber.js";
 import { getIPool, getToken } from "./abis";
 import { provider } from "./provider";
@@ -18,21 +18,21 @@ export const SWAP_RATIO: { [deposit_buffer: number]: number } = {
   40: 3.06,
 };
 
-export const convertEtherBigIntToBNJS = (value: bigint) => BigNumberJS(value.toString());
+export const convertEtherBNToBNJS = (value: BigNumber) => BigNumberJS(value.toString());
 
-export const convertEtherBigIntToBNJSInObject = (
-  object: Record<string, any | bigint>,
-): Record<string, any | BigNumberJS> => {
-  const newObject: Record<string, any | BigNumberJS> = {};
+export const convertEtherBNToBNJSInObject = (
+  object: Record<string, any | BigNumber>,
+): Record<string, any | BigNumber> => {
+  const newObject: Record<string, any | BigNumber> = {};
   for (const key in object) {
-    if (Object.prototype.hasOwnProperty.call(object, key)) {
-      const element = object[key];
-      if (typeof element === 'bigint') {
-        newObject[key] = convertEtherBigIntToBNJS(element);
-      } else {
-        newObject[key] = element;
+      if (Object.prototype.hasOwnProperty.call(object, key)) {
+          const element = object[key];
+          if (element._isBigNumber) {
+              newObject[key] = convertEtherBNToBNJS(element);
+          } else {
+              newObject[key] = element;
+          }
       }
-    }
   }
   return newObject;
 };
@@ -43,7 +43,7 @@ export const getBalance = async (
 ): Promise<BigNumberJS> => {
   const tokenContract = getToken(tokenAddress, provider);
   const balance = await tokenContract.balanceOf(address);
-  return convertEtherBigIntToBNJS(balance);
+  return BigNumberJS(balance.toString());
 };
 
 export const getTokenPricing = async (): Promise<{
@@ -51,12 +51,12 @@ export const getTokenPricing = async (): Promise<{
 }> => {
   const tokens = [getUSDC(), getWMATIC(), getWETH(), getWBTC()];
   const prices = await Promise.all(
-    tokens.map((token) => getAggregator(token.aggregator).latestAnswer()),
+      tokens.map((token) => getAggregator(token.aggregator).latestAnswer()),
   );
   return prices.reduce((acc, cur, index) => {
-    acc[tokens[index].symbol] = convertEtherBigIntToBNJS(cur).div(TEN_POW(8));
-    return acc;
-  }, {} as { [name: string]: BigNumberJS });
+      acc[tokens[index].symbol] = BigNumberJS(cur.toString()).div(TEN_POW(8));
+      return acc;
+  }, {});
 };
 
 export interface UserAccountData {
@@ -71,7 +71,7 @@ export interface UserAccountData {
 export const getUserAccountData = async (user: UserEntity): Promise<UserAccountData> => {
   const iPoolContract = getIPool(getIPoolAddress(), provider);
   const data = await iPoolContract.getUserAccountData(user.wallet_address);
-  return convertEtherBigIntToBNJSInObject(data) as UserAccountData;
+  return convertEtherBNToBNJSInObject(data) as UserAccountData;
 };
 
 export enum AppFeeType {
@@ -112,18 +112,18 @@ export interface Action {
 export const getHFAfterActions = (accountData: UserAccountData, actions: Action[]) => {
   const { totalCollateralBase, totalDebtBase, currentLiquidationThreshold } = accountData;
   let totalCollateral = totalCollateralBase
-    .multipliedBy(currentLiquidationThreshold)
-    .dividedBy(10000)
-    .dividedBy(TEN_POW(8));
-  let totalDebt = BigNumberJS(totalDebtBase).dividedBy(TEN_POW(8));
+      .times(currentLiquidationThreshold)
+      .div(10000)
+      .div(TEN_POW(8));
+  let totalDebt = BigNumberJS(totalDebtBase).div(TEN_POW(8));
   for (const { token, amount, tokenPrice, type } of actions) {
-    if (type === ActionType.DEPOSIT) {
-      totalCollateral = totalCollateral.plus(
-        amount.multipliedBy(tokenPrice).multipliedBy(token.LT).dividedBy(TEN_POW(token.decimals)),
-      );
-    } else {
-      totalDebt = totalDebt.plus(amount.multipliedBy(tokenPrice).dividedBy(TEN_POW(token.decimals)));
-    }
+      if (type === ActionType.DEPOSIT) {
+          totalCollateral = totalCollateral.plus(
+              amount.multipliedBy(tokenPrice).multipliedBy(token.LT).div(TEN_POW(token.decimals)),
+          );
+      } else {
+          totalDebt = totalDebt.plus(amount.multipliedBy(tokenPrice).div(TEN_POW(token.decimals)));
+      }
   }
-  return totalCollateral.dividedBy(totalDebt);
+  return totalCollateral.div(totalDebt);
 };
