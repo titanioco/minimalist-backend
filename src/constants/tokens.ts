@@ -27,7 +27,6 @@ export const USDC: TokenMap = {
 		LT: 0.93,
 		aggregator: "0xfE4A8cc5b5B2366C1B58Bea3858e81843581b2F7",
 	},
-	4002: null,
 };
 
 export const WMATIC: TokenMap = {
@@ -40,7 +39,6 @@ export const WMATIC: TokenMap = {
 		LT: 0.925,
 		aggregator: "0xAB594600376Ec9fD91F8e885dADF0CE036862dE0",
 	},
-	4002: null,
 };
 
 export const WETH: TokenMap = {
@@ -53,7 +51,6 @@ export const WETH: TokenMap = {
 		LT: 0.9,
 		aggregator: "0xF9680D99D6C9589e2a93a78A04A279e509205945",
 	},
-	4002: null,
 };
 
 export const WBTC: TokenMap = {
@@ -66,7 +63,6 @@ export const WBTC: TokenMap = {
 		LT: 0.73,
 		aggregator: "0xc907E116054Ad103354f2D350FD2514433D57F6f",
 	},
-	4002: null,
 };
 
 export const getUSDCAddress = (chainId: ChainId = NETWORK): string => {

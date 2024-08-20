@@ -5,7 +5,7 @@ import { ethers, BigNumber  } from "ethers";
 import { ChainId } from "./types/types";
 
 export const NETWORK: number = parseInt(
-  process.env.NETWORK ?? ChainId.FTM_TESTNET.toString()
+  process.env.NETWORK
 );
 
 export const PRIVATE_KEY: string = process.env.PRIVATE_KEY!;

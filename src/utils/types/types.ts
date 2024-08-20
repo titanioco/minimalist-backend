@@ -2,7 +2,6 @@ import HttpStatus from './httpStatus';
 
 export const enum ChainId {
     POLYGON = 137,
-    FTM_TESTNET = 4002,
 }
 
 export const TransactionStatus = {

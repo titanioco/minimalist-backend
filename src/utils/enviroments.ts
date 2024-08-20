@@ -9,7 +9,7 @@ const env = process.env.NODE_ENV || 'development';
 export const isDevelopment = env === 'development';
 export const isProduction = env === 'production';
 
-export const NETWORK: number = parseInt(process.env.NETWORK ?? '4002');
+export const NETWORK: number = parseInt(process.env.NETWORK ?? '137');
 export const CHAIN_ID: number = isDevelopment ? 137 : NETWORK;
 
 export const PRIVATE_KEY: string = process.env.PRIVATE_KEY!;
