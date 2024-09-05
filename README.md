@@ -1,4 +1,5 @@
-**[Esta es una revisión del funcionaiento de la aplicación stackit, para un mejor entendimiento de la tecnologia involucrada y cómo se aplica en web3]](https://app.guidde.com/playbooks/t8h4qvwj2KB4ZyyZMhS9Mf)==============================================================**
+**[Esta es una revisión del funcionaiento de la aplicación stackit, para un mejor entendimiento de la tecnologia involucrada y cómo se aplica en web3](https://app.guidde.com/playbooks/t8h4qvwj2KB4ZyyZMhS9Mf)
+==============================================================**
 
 [Click here to watch](https://app.guidde.com/share/playbooks/t8h4qvwj2KB4ZyyZMhS9Mf)
 
